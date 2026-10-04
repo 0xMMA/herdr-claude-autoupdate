@@ -101,6 +101,13 @@ Unit tests cannot cover herdr and Claude Code themselves. Before a release, chec
   (`fix: …`, `feat: …`, `docs: …`).
 - CI must pass on Linux, macOS and Windows.
 
+## Node.js versions
+
+The plugin supports the oldest Node.js LTS that can run TypeScript directly (22.18).
+`@types/node` therefore stays on that major version, so the type check rejects APIs that
+older supported versions lack. CI runs the tests on that minimum, the active LTS and the
+current release, to catch upcoming breakage early.
+
 ## Releases
 
 1. Update the version in `package.json` **and** `herdr-plugin.toml` (a test checks they match).
