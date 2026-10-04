@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findLauncher, installedVersion, readSessions } from "./claude.ts";
 import { Clock, type ClockSnapshot } from "./clock.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, writeDryRun } from "./config.ts";
 import { runCountdown } from "./countdown.ts";
 import { HerdrCli } from "./herdr.ts";
 import { isRunning, request } from "./ipc.ts";
@@ -18,6 +18,8 @@ const DEFAULT_PLUGIN_ID = "claude-autoupdate";
 
 const USAGE = `usage: claude-autoupdate <command>
 
+  live            turn dry run off and make sure the clock is running
+  dry-run         turn dry run back on (only log what would happen)
   ensure-clock    start the background clock unless it is already running
   restart-clock   stop the running clock and start a new one (after an update of this plugin)
   stop-clock      stop the running clock
@@ -33,6 +35,20 @@ export async function main(argv: readonly string[]): Promise<number> {
   switch (command) {
     case "ensure-clock":
       return ensureClock(paths.clockEndpoint);
+    case "live":
+    case "dry-run": {
+      const live = command === "live";
+      const written = writeDryRun(paths.configDir, !live);
+      if (!written.ok) {
+        console.error(written.error);
+        return 1;
+      }
+      console.log(live ? "live: idle, outdated Claude panes will be restarted" : "dry run: the plugin only logs what it would do");
+      const code = await ensureClock(paths.clockEndpoint);
+      // Apply now instead of at the next interval.
+      if (code === 0) await request(paths.clockEndpoint, "tick").catch(() => undefined);
+      return code;
+    }
     case "restart-clock":
       if (!(await stopClock(paths.clockEndpoint))) return 1;
       return ensureClock(paths.clockEndpoint);
