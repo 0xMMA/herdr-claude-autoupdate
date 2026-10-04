@@ -41,7 +41,9 @@ The plugin never installs updates itself; Claude Code's own updater keeps doing 
 
 ## Requirements
 
-- herdr 0.9.3 or newer
+- herdr 0.9.3 or newer, with herdr's Claude Code integration installed
+  (`herdr integration install claude`; check with `herdr integration status`). It tells
+  herdr which session runs in which pane; without it no pane can be matched.
 - Node.js 22.18 or newer on the `PATH` of the herdr server (`node --version`)
 - Claude Code installed with the native installer, npm, Homebrew or WinGet, so that
   `claude` is on the `PATH`
@@ -121,9 +123,14 @@ Run them with `herdr plugin action invoke <action>` or bind them to keys in herd
   shows a dialog or gets typed into in the meantime is left alone.
 - Each session gets one attempt per Claude Code version. A failure or a cancelled
   countdown is remembered until the next version.
-- The session is never resumed with more permissions than it had.
+- The session is never resumed with more permissions than it had: the live permission
+  mode is passed explicitly, also when it is the default mode.
+- A pane without a herdr agent name gets one (`cau-<pane>`), because `herdr agent start`
+  needs a name.
 - The plugin makes no network connections. Its log (`plugin.log` in herdr's plugin state
-  directory) stays on your machine; it may contain the text of a rescued draft.
+  directory, readable only by you on Linux and macOS) stays on your machine. It may contain
+  the text of a rescued draft; values of `--mcp-config`, `--settings`, `--agents` and the
+  system-prompt flags are masked.
 
 See [SECURITY.md](SECURITY.md) for what the plugin is allowed to do.
 
@@ -138,7 +145,9 @@ Start with the status action; it shows each outdated pane with the reason it is 
 | `prompt box not visible (dialog open?)` | A question, permission prompt or menu is open. Answer it. |
 | `unsent draft contains attachments` | Drafts with pasted text blocks or images are not moved. Send or clear it. |
 | `focused and the countdown could not be shown` | Another herdr popup or modal was open. It retries. |
-| `not in a herdr pane on this server` | The session runs outside herdr or on another machine; it is never touched. |
+| `waiting: …` | The pane was skipped right before acting (reason shown); it is retried after 3 minutes, other panes go first. |
+| `session directory differs from the pane's shell directory` | The session lives in another directory (e.g. started with `--worktree`) and cannot be resumed in place. Restart it yourself. |
+| `not in a herdr pane on this server` | The session runs outside herdr, on another machine, or herdr's Claude integration is missing. It is never touched. |
 | `failed: …` | See the log. The pane is not retried until the next Claude Code version. |
 | `clock: NOT running` | Run the `ensure-clock` action. |
 

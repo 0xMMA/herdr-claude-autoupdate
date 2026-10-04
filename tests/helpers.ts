@@ -126,8 +126,10 @@ export class FakeHerdr implements Herdr {
     this.calls.push({ method: "readScreen", args: [paneId] });
     return this.take(this.screens, "screen");
   }
+  sendKeysError: Error | undefined;
   async sendKeys(paneId: string, keys: string[]): Promise<void> {
     this.calls.push({ method: "sendKeys", args: [paneId, keys] });
+    if (this.sendKeysError) throw this.sendKeysError;
   }
   async agentStart(name: string, paneId: string, args: string[], timeoutMs: number): Promise<void> {
     this.calls.push({ method: "agentStart", args: [name, paneId, args, timeoutMs] });

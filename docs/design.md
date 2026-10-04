@@ -41,6 +41,11 @@ It has two modes:
 | each interval | `stat()` of the launcher and of `config.json` | read session files; herdr calls for outdated sessions only |
 | ends | when the launcher changes | when no outdated session in a herdr pane can still be restarted |
 
+Even in update mode herdr is only asked when at least one outdated session passes the
+cheap file checks (idle and quiet long enough). After ten checks without a restart, the
+interval grows fivefold until something happens. Session files of processes that no
+longer exist are ignored, and duplicate files for one session id are collapsed.
+
 **Single instance and control.** The clock listens on a local socket (a named pipe on
 Windows), keyed by the herdr server's socket path. The operating system releases it when
 the process dies, so it works as a lock without heartbeats, and the `tick`, `status` and
@@ -49,7 +54,9 @@ the process dies, so it works as a lock without heartbeats, and the `tick`, `sta
 **State.** Everything is read live (R12): herdr's agent list, Claude's session files
 (`version`, `status`, `statusUpdatedAt`), the process list of a pane and its screen. The
 only stored state is `marks.json`, which records per session the version a restart was
-attempted for and its result (`done`, `failed`, `declined`, `dry-run`).
+attempted for and its result (`done`, `failed`, `declined`, `dry-run`). In memory the
+clock also keeps, per session, a short back-off after a pane was skipped right before
+acting, so that one pane cannot block the others.
 
 ## Deciding and restarting
 
@@ -82,10 +89,23 @@ Details:
 
 - **Pairing panes and sessions.** herdr reports the Claude session id of each pane
   (`agent_session`). Session files are matched by that id, and `pane process-info` must
-  show the same PID in the foreground before anything is sent.
+  show the same PID in the foreground before anything is sent. A session whose directory
+  differs from the pane's shell directory (for example one started with `--worktree`) is
+  never restarted, because `claude --resume` would run in the wrong place.
+- **Re-checks.** Right before the first key, and again after the countdown, the pane's
+  herdr status, its session id, the session file's status, the foreground process and the
+  screen are read again. A countdown popup that was shown but did not answer blocks the
+  restart, because it may still be on screen.
 - **Flags.** `src/args.ts` keeps an allow-list of flags that describe how a session runs
   and a list of flags that select or create sessions. Unknown flags are dropped, because a
   misread value could become a prompt.
+- **Permission mode.** The mode shown in Claude's footer is passed with
+  `--permission-mode`. Without an indicator, the CLI's name for the default mode
+  (`manual`, read once per version from `claude --help`) is passed, so a `defaultMode` from
+  settings cannot make the resumed session more permissive.
+- **Failures.** Once the first key has been sent, every error ends in a recorded
+  `failed` outcome (log, optional notification); the session is not tried again for this
+  version.
 - **Prompt box.** `src/screen.ts` reads an ANSI capture of the pane. The prompt box is the
   bottom-most block between two horizontal rules that starts with `❯`. Dim or grey text in
   it is a placeholder, not a draft. Option lists and dialog hints mean "not the prompt box".
@@ -114,7 +134,10 @@ Details:
 - **Effort set with `/effort` inside a session** is not visible from outside; the resumed
   session uses the effort from settings or from the original `--effort` flag.
 - **Permission mode** is read from the footer text (`auto mode on`, `accept edits on`,
-  `plan mode on`, `bypass permissions on`). Without a mode indicator, the session resumes in
-  the default mode from settings.
+  `plan mode on`, `bypass permissions on`). A future change of these texts would make the
+  plugin pass the default mode, which is the safe direction.
+- **Agent names.** `herdr agent start` needs a name; panes without one get `cau-<pane>`.
+- **Configuration is per user**, shared by all herdr sessions on a machine (herdr keeps
+  plugin config per user).
 - **Screen heuristics** depend on Claude Code's UI. If a future version changes the prompt
   box, the plugin sees "prompt box not visible" and waits instead of acting.

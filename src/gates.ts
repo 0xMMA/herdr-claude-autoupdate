@@ -41,11 +41,24 @@ export function sessionGate(
   return OK;
 }
 
-export function paneGate(agent: AgentInfo): Verdict {
+export function paneGate(agent: AgentInfo, session: ClaudeSession): Verdict {
   if (agent.agent !== "claude") return never("pane is no longer running claude");
+  // `claude --resume` runs in the pane's shell directory. A session that lives elsewhere
+  // (e.g. started with --worktree) would not be found there and would be lost.
+  if (agent.cwd && session.cwd && !samePath(agent.cwd, session.cwd)) {
+    return never("session directory differs from the pane's shell directory (--worktree?)");
+  }
   if (agent.launch_pending) return wait("herdr: launch pending");
   if (agent.agent_status !== "idle" && agent.agent_status !== "done") return wait(`herdr: ${agent.agent_status}`);
   return OK;
+}
+
+export function samePath(a: string, b: string): boolean {
+  const norm = (p: string) => {
+    const unified = p.replace(/\\/g, "/").replace(/\/+$/, "");
+    return /^[A-Za-z]:/.test(unified) ? unified.toLowerCase() : unified;
+  };
+  return norm(a) === norm(b);
 }
 
 export function screenGate(screen: ScreenInfo, config: GateConfig): Verdict {
@@ -105,7 +118,7 @@ export function assess(
       continue;
     }
     let verdict = sessionGate(session, installed, marks[session.sessionId], now, config);
-    if (verdict.ok) verdict = paneGate(agent);
+    if (verdict.ok) verdict = paneGate(agent, session);
     out.push({ session, agent, outdated, verdict });
   }
   return out;
@@ -116,9 +129,9 @@ export function hasPendingWork(assessments: readonly Assessment[]): boolean {
   return assessments.some((a) => a.outdated && (a.verdict.ok || !a.verdict.final));
 }
 
-/** Restart order: the session that has been idle longest goes first. */
-export function nextCandidate(assessments: readonly Assessment[]): Assessment | undefined {
+/** Sessions that may be restarted now, the one idle longest first. */
+export function restartCandidates(assessments: readonly Assessment[]): Assessment[] {
   return assessments
     .filter((a) => a.verdict.ok && a.agent)
-    .sort((a, b) => a.session.statusUpdatedAt - b.session.statusUpdatedAt)[0];
+    .sort((a, b) => a.session.statusUpdatedAt - b.session.statusUpdatedAt);
 }

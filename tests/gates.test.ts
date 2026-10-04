@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assess, hasPendingWork, nextCandidate, paneGate, screenGate, sessionGate } from "../src/gates.ts";
+import { assess, hasPendingWork, paneGate, restartCandidates, samePath, screenGate, sessionGate } from "../src/gates.ts";
 import type { ScreenInfo } from "../src/screen.ts";
 import { agent, config, session } from "./helpers.ts";
 
@@ -57,10 +57,10 @@ test("non-interactive sessions are never touched", () => {
 });
 
 test("R5: herdr must also see the pane as idle or done", () => {
-  assert.equal(paneGate(agent({ agent_status: "done" })).ok, true);
-  assert.equal(reason(paneGate(agent({ agent_status: "working" }))), "herdr: working");
-  assert.equal(reason(paneGate(agent({ agent_status: "blocked" }))), "herdr: blocked");
-  assert.equal(paneGate(agent({ launch_pending: true })).ok, false);
+  assert.equal(paneGate(agent({ agent_status: "done" }), session()).ok, true);
+  assert.equal(reason(paneGate(agent({ agent_status: "working" }), session())), "herdr: working");
+  assert.equal(reason(paneGate(agent({ agent_status: "blocked" }), session())), "herdr: blocked");
+  assert.equal(paneGate(agent({ launch_pending: true }), session()).ok, false);
 });
 
 test("R5/R6: screen gate", () => {
@@ -83,7 +83,7 @@ test("R4/R10: sessions are paired with panes by session id; others are never act
   assert.equal(byId.get("a")!.verdict.ok, true);
   assert.equal(reason(byId.get("b")!.verdict), "not in a herdr pane on this server");
   assert.equal(byId.get("c")!.outdated, false);
-  assert.equal(nextCandidate(result)!.session.sessionId, "a");
+  assert.equal(restartCandidates(result)[0]!.session.sessionId, "a");
 });
 
 test("R11: update mode ends when nothing outdated can still be restarted", () => {
@@ -105,5 +105,19 @@ test("the longest-idle session goes first", () => {
     agent({ pane_id: "w1:p1", agent_session: { value: "new" } }),
     agent({ pane_id: "w1:p2", agent_session: { value: "old" } }),
   ];
-  assert.equal(nextCandidate(assess([newer, older], agents, INSTALLED, {}, NOW, config()))!.session.sessionId, "old");
+  assert.deepEqual(restartCandidates(assess([newer, older], agents, INSTALLED, {}, NOW, config())).map((a) => a.session.sessionId), ["old", "new"]);
+});
+
+test("R2/R3: a session living in another directory than the pane's shell is never restarted", () => {
+  const worktree = session({ cwd: "/repo/.claude/worktrees/feature" });
+  const v = paneGate(agent({ cwd: "/repo" }), worktree);
+  assert.equal(v.ok, false);
+  assert.equal(!v.ok && v.final, true);
+  assert.equal(paneGate(agent({ cwd: "C:\\Source\\App\\" }), session({ cwd: "c:/source/app" })).ok, true);
+  assert.equal(paneGate(agent({ cwd: null }), worktree).ok, true, "unknown shell directory: no opinion");
+});
+
+test("samePath normalises separators, trailing slashes and drive-letter case", () => {
+  assert.equal(samePath("C:\\Work\\x\\", "c:/work/x"), true);
+  assert.equal(samePath("/home/u/x", "/home/u/X"), false, "POSIX paths stay case-sensitive");
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { rebuildArgs } from "../src/args.ts";
+import { rebuildArgs, redactArgs } from "../src/args.ts";
 
 const SID = "00000000-0000-4000-8000-0000000000aa";
 
@@ -66,4 +66,18 @@ test("R3/R16: never resumes more permissive than the live session", () => {
 test("optional-value flags only take a following non-flag token", () => {
   assert.deepEqual(rebuildArgs(["--debug", "--model", "x"], SID).args, ["--debug", "--model", "x", "--resume", SID]);
   assert.deepEqual(rebuildArgs(["--debug", "api,hooks"], SID).args, ["--debug", "api,hooks", "--resume", SID]);
+});
+
+test("R3/R16: without a mode indicator the default mode is passed explicitly", () => {
+  // A defaultMode from settings must not make the resumed session more permissive.
+  assert.deepEqual(rebuildArgs([], SID, null, "manual").args, ["--permission-mode", "manual", "--resume", SID]);
+  assert.deepEqual(rebuildArgs([], SID, null, undefined).args, ["--resume", SID], "unknown name: nothing passed");
+  assert.deepEqual(rebuildArgs([], SID, undefined, "manual").args, ["--resume", SID], "unknown live mode: argv kept as is");
+});
+
+test("R17: sensitive flag values are masked for the log", () => {
+  assert.deepEqual(
+    redactArgs(["--model", "sonnet", "--mcp-config", "a.json", "{\"token\":1}", "--settings={\"k\":2}", "--resume", SID]),
+    ["--model", "sonnet", "--mcp-config", "<redacted>", "<redacted>", "--settings=<redacted>", "--resume", SID],
+  );
 });

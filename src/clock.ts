@@ -1,22 +1,31 @@
 import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { findLauncher, installedVersion, launcherFingerprint, readSessions, type ClaudeSession } from "./claude.ts";
+import { redactArgs } from "./args.ts";
+import {
+  defaultModeName,
+  findLauncher,
+  installedVersion,
+  launcherFingerprint,
+  liveSessions,
+  readSessions,
+  type ClaudeSession,
+} from "./claude.ts";
 import { CONFIG_FILE, loadConfig, type Config } from "./config.ts";
-import { assess, hasPendingWork, nextCandidate, type Assessment } from "./gates.ts";
-import { HerdrError, type Herdr } from "./herdr.ts";
+import { assess, hasPendingWork, restartCandidates, sessionGate, type Assessment } from "./gates.ts";
+import { HerdrError, type AgentInfo, type Herdr } from "./herdr.ts";
 import { serveExclusive, type Command } from "./ipc.ts";
 import type { Paths } from "./paths.ts";
-import { restartPane, type Outcome } from "./restart.ts";
+import { restartPane, type Outcome, type RestartDeps } from "./restart.ts";
 import type { Store } from "./store.ts";
 import { isOlder } from "./version.ts";
 
 /**
  * The clock is the plugin's only long-running process (R11):
  *
- * - idle mode: one stat() of the claude launcher per interval, nothing else;
- * - update mode: entered when the launcher changed (or on start / on demand), it reads
- *   Claude's session files and talks to herdr only while outdated panes remain.
+ * - idle mode: one stat() of the claude launcher and of config.json per interval;
+ * - update mode: entered when either changed (or on start / on demand). It reads Claude's
+ *   session files and talks to herdr only while outdated panes remain.
  */
 
 export interface ClockContext {
@@ -27,6 +36,8 @@ export interface ClockContext {
   pluginRoot: string;
   herdrSocket: string | undefined;
   env: Record<string, string | undefined>;
+  /** Process liveness check; injectable for tests. */
+  isAlive?: (pid: number) => boolean;
 }
 
 export type Mode = "idle" | "update";
@@ -45,22 +56,34 @@ export interface ClockSnapshot {
 
 const MAX_HERDR_FAILURES = 3;
 const MAX_SOCKET_MISSES = 3;
+/** A pane that was skipped right before acting is retried after this long; others go first. */
+const SKIP_BACKOFF_MS = 3 * 60_000;
+/** After this many update-mode checks without a restart, check less often. */
+const SLOWDOWN_AFTER = 10;
+const SLOWDOWN_FACTOR = 5;
+const STALE_COUNTDOWN_MS = 10 * 60_000;
 
 export class Clock {
   private readonly ctx: ClockContext;
   private mode: Mode = "update"; // the first check after start is always a full one
   private config: Config;
   private configWarnings: string[];
+  private configStamp: string | undefined;
   private launcher: string | undefined;
   private fingerprint: string | undefined;
+  /** What `installed` was derived from: the launcher fingerprint or the fake version. */
+  private installedKey: string | undefined;
   private installed: string | undefined;
+  private defaultMode: string | undefined;
   private lastCheckAt: number | undefined;
+  private agents: AgentInfo[] = [];
   private assessments: Assessment[] = [];
-  private lastReasons = new Map<string, string>();
+  private readonly skipped = new Map<string, { until: number; reason: string }>();
+  private readonly lastReasons = new Map<string, string>();
+  private unproductiveChecks = 0;
   private herdrFailures = 0;
   private socketMisses = 0;
   private forced = false;
-  private configStamp: string | undefined;
   private stopping = false;
   private readonly startedAt = Date.now();
   private wake: (() => void) | undefined;
@@ -68,6 +91,7 @@ export class Clock {
   constructor(ctx: ClockContext) {
     this.ctx = ctx;
     ({ config: this.config, warnings: this.configWarnings } = loadConfig(ctx.paths.configDir));
+    this.configStamp = fileStamp(join(ctx.paths.configDir, CONFIG_FILE));
   }
 
   log(message: string): void {
@@ -91,7 +115,7 @@ export class Clock {
       }
       if (this.stopping) break;
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, this.config.intervalSeconds * 1000);
+        const timer = setTimeout(resolve, this.intervalMs());
         this.wake = () => {
           clearTimeout(timer);
           resolve();
@@ -103,12 +127,19 @@ export class Clock {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
+  private intervalMs(): number {
+    const base = this.config.intervalSeconds * 1000;
+    return this.mode === "update" && this.unproductiveChecks >= SLOWDOWN_AFTER ? base * SLOWDOWN_FACTOR : base;
+  }
+
   private handle(command: Command): unknown {
     switch (command) {
       case "ping":
         return "pong";
       case "tick":
         this.forced = true;
+        this.unproductiveChecks = 0;
+        this.skipped.clear();
         this.wake?.();
         return "ok";
       case "stop":
@@ -121,6 +152,7 @@ export class Clock {
   }
 
   snapshot(): ClockSnapshot {
+    const now = Date.now();
     return {
       mode: this.mode,
       pid: process.pid,
@@ -130,13 +162,12 @@ export class Clock {
       installed: this.installed,
       config: this.config,
       configWarnings: this.configWarnings,
-      panes: this.assessments.map((a) => ({
-        pane: a.agent?.pane_id,
-        sessionId: a.session.sessionId,
-        version: a.session.version,
-        outdated: a.outdated,
-        status: a.verdict.ok ? "ready to restart" : a.verdict.reason,
-      })),
+      panes: this.assessments.map((a) => {
+        const skip = this.skipped.get(a.session.sessionId);
+        let status = a.verdict.ok ? "ready to restart" : a.verdict.reason;
+        if (a.verdict.ok && skip && skip.until > now) status = `waiting: ${skip.reason}`;
+        return { pane: a.agent?.pane_id, sessionId: a.session.sessionId, version: a.session.version, outdated: a.outdated, status };
+      }),
     };
   }
 
@@ -166,73 +197,116 @@ export class Clock {
     if (this.mode === "idle" && fingerprint === this.fingerprint && !this.forced) return;
 
     // Update mode from here on.
-    this.mode = "update";
+    const wasForced = this.forced;
     this.forced = false;
+    this.mode = "update";
     this.lastCheckAt = Date.now();
-    ({ config: this.config, warnings: this.configWarnings } = loadConfig(this.ctx.paths.configDir));
-    if (fingerprint !== this.fingerprint || !this.installed || this.config.fakeInstalledVersion) {
-      const installed = this.config.fakeInstalledVersion ?? (await installedVersion(this.launcher));
-      if (!installed) {
-        this.log(`could not determine the installed claude version (${this.launcher})`);
-        this.mode = "idle";
-        return;
-      }
-      if (installed !== this.installed) this.log(`installed claude version: ${installed}`);
-      this.installed = installed;
-    }
-    this.fingerprint = fingerprint;
-    const installed = this.installed;
+    this.fingerprint = fingerprint; // stored first: a failed lookup must not repeat every interval
+    if (wasForced) ({ config: this.config, warnings: this.configWarnings } = loadConfig(this.ctx.paths.configDir));
 
-    const sessions = readSessions(this.ctx.paths.sessionsDir);
-    if (!sessions.some((s) => isOlder(s.version, installed))) {
+    const installed = await this.resolveInstalled(fingerprint);
+    if (!installed) {
+      this.mode = "idle";
+      return;
+    }
+
+    const sessions = liveSessions(readSessions(this.ctx.paths.sessionsDir), this.ctx.isAlive);
+    const outdated = sessions.filter((s) => isOlder(s.version, installed));
+    if (outdated.length === 0) {
       this.assessments = [];
       this.enterIdle("all claude sessions are up to date");
       return;
     }
 
-    const herdr = this.ctx.herdr;
-    let agents;
-    try {
-      agents = await herdr.agentList();
-      if ((await herdr.pluginEnabled(this.ctx.pluginId)) === false) {
-        this.log("plugin is disabled; stopping");
-        this.stopping = true;
+    // Ask herdr only if some outdated session could be restarted now (R11).
+    const now = Date.now();
+    const marks = this.ctx.store.readMarks();
+    const actionable = outdated.some(
+      (s) => sessionGate(s, installed, marks[s.sessionId], now, this.config).ok && !this.inBackoff(s, now),
+    );
+    if (actionable || this.agents.length === 0) {
+      try {
+        this.agents = await this.ctx.herdr.agentList();
+        if ((await this.ctx.herdr.pluginEnabled(this.ctx.pluginId)) === false) {
+          this.log("plugin is disabled; stopping");
+          this.stopping = true;
+          return;
+        }
+        this.herdrFailures = 0;
+      } catch (error) {
+        this.onHerdrError(error);
         return;
       }
-      this.herdrFailures = 0;
-    } catch (error) {
-      this.onHerdrError(error);
-      return;
     }
 
-    const marks = this.ctx.store.readMarks();
-    const now = Date.now();
-    this.assessments = assess(sessions, agents, installed, marks, now, this.config);
+    this.assessments = assess(sessions, this.agents, installed, marks, now, this.config);
     this.logReasonChanges();
     this.ctx.store.pruneMarks(new Set(sessions.map((s) => s.sessionId)), now);
 
-    const candidate = nextCandidate(this.assessments);
-    if (candidate) {
-      let outcome: Outcome;
-      try {
-        outcome = await restartPane(candidate, this.restartDeps(installed));
-      } catch (error) {
-        if (error instanceof HerdrError) {
-          this.onHerdrError(error);
-          return;
-        }
-        outcome = { kind: "failed", reason: (error as Error).message };
-      }
-      await this.record(candidate, outcome, installed);
-      if (outcome.kind !== "skipped") this.assessments = this.assessments.filter((a) => a !== candidate);
-    }
+    const acted = await this.restartOne(installed, now);
+    this.unproductiveChecks = acted ? 0 : this.unproductiveChecks + 1;
 
     if (!hasPendingWork(this.assessments)) this.enterIdle("no restartable outdated panes left");
+  }
+
+  /** Tries candidates in order (longest idle first) until one is acted on; skips do not block the rest. */
+  private async restartOne(installed: string, now: number): Promise<boolean> {
+    const candidates = restartCandidates(this.assessments).filter((a) => !this.inBackoff(a.session, now));
+    for (const candidate of candidates) {
+      let outcome: Outcome;
+      try {
+        outcome = await restartPane(candidate, await this.restartDeps(installed));
+      } catch (error) {
+        // Only the read-only checks can throw here; nothing was sent to the pane.
+        if (error instanceof HerdrError) this.onHerdrError(error);
+        else this.log(`check of ${candidate.agent?.pane_id} failed: ${(error as Error).message}`);
+        return false;
+      }
+      await this.record(candidate, outcome, installed);
+      if (outcome.kind === "skipped") {
+        this.skipped.set(candidate.session.sessionId, { until: Date.now() + SKIP_BACKOFF_MS, reason: outcome.reason });
+        continue;
+      }
+      this.skipped.delete(candidate.session.sessionId);
+      this.assessments = this.assessments.filter((a) => a !== candidate);
+      return true;
+    }
+    return false;
+  }
+
+  private inBackoff(session: ClaudeSession, now: number): boolean {
+    const skip = this.skipped.get(session.sessionId);
+    return skip !== undefined && skip.until > now;
+  }
+
+  private async resolveInstalled(fingerprint: string): Promise<string | undefined> {
+    const fake = this.config.fakeInstalledVersion;
+    const key = fake ? `fake:${fake}` : `real:${fingerprint}`;
+    if (key === this.installedKey && this.installed) return this.installed;
+    this.installedKey = key;
+    this.installed = undefined;
+    try {
+      this.installed = fake ?? (await installedVersion(this.launcher!));
+    } catch (error) {
+      this.log(`could not run ${this.launcher} --version: ${(error as Error).message}`);
+    }
+    if (!this.installed) {
+      this.log(`could not determine the installed claude version (${this.launcher}); waiting for it to change`);
+      return undefined;
+    }
+    this.log(`installed claude version: ${this.installed}${fake ? " (fake_installed_version)" : ""}`);
+    try {
+      this.defaultMode = await defaultModeName(this.launcher!);
+    } catch {
+      this.defaultMode = undefined;
+    }
+    return this.installed;
   }
 
   private enterIdle(reason: string): void {
     if (this.mode !== "idle") this.log(`idle: ${reason}`);
     this.mode = "idle";
+    this.unproductiveChecks = 0;
   }
 
   private herdrServerPresent(): boolean {
@@ -270,11 +344,12 @@ export class Clock {
     }
   }
 
-  private restartDeps(installed: string) {
+  private async restartDeps(installed: string): Promise<RestartDeps> {
     return {
       herdr: this.ctx.herdr,
       config: this.config,
       installed,
+      defaultModeName: this.defaultMode,
       pluginId: this.ctx.pluginId,
       pluginRoot: this.ctx.pluginRoot,
       stateDir: this.ctx.paths.stateDir,
@@ -301,7 +376,7 @@ export class Clock {
         break;
       case "dry-run":
         store.setMark(session.sessionId, { version: installed, result: "dry-run", at });
-        this.log(`${pane} ${short(session)}: dry run, would restart with: claude ${outcome.args.join(" ")}`);
+        this.log(`${pane} ${short(session)}: dry run, would restart with: claude ${redactArgs(outcome.args).join(" ")}`);
         break;
       case "declined":
         store.setMark(session.sessionId, { version: installed, result: "declined", at });
@@ -327,10 +402,14 @@ export class Clock {
     }
   }
 
+  /** Answer files of popups that never finished. Recent ones may belong to another clock. */
   private removeStaleCountdownFiles(): void {
+    const dir = this.ctx.paths.stateDir;
     try {
-      for (const name of readdirSync(this.ctx.paths.stateDir)) {
-        if (name.startsWith("countdown-")) unlinkSync(join(this.ctx.paths.stateDir, name));
+      for (const name of readdirSync(dir)) {
+        if (!name.startsWith("countdown-")) continue;
+        const path = join(dir, name);
+        if (Date.now() - statSync(path).mtimeMs > STALE_COUNTDOWN_MS) unlinkSync(path);
       }
     } catch {
       // nothing to clean

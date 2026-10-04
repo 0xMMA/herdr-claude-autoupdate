@@ -34,12 +34,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "ensure-clock":
       return ensureClock(paths.clockEndpoint);
     case "restart-clock":
-      await stopClock(paths.clockEndpoint);
+      if (!(await stopClock(paths.clockEndpoint))) return 1;
       return ensureClock(paths.clockEndpoint);
     case "stop-clock":
-      await stopClock(paths.clockEndpoint);
-      console.log("clock stopped");
-      return 0;
+      return (await stopClock(paths.clockEndpoint)) ? 0 : 1;
     case "tick":
       if (!(await isRunning(paths.clockEndpoint))) {
         console.log("clock is not running; start it with ensure-clock");
@@ -104,12 +102,23 @@ async function ensureClock(endpoint: string): Promise<number> {
   return 1;
 }
 
-async function stopClock(endpoint: string): Promise<void> {
-  if (!(await isRunning(endpoint))) return;
-  await request(endpoint, "stop");
-  for (let i = 0; i < 40 && (await isRunning(endpoint)); i++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+/** Asks the clock to stop. A restart in progress is finished first, which can take up to two minutes. */
+async function stopClock(endpoint: string): Promise<boolean> {
+  if (!(await isRunning(endpoint))) {
+    console.log("clock is not running");
+    return true;
   }
+  await request(endpoint, "stop");
+  const deadline = Date.now() + 150_000;
+  while (Date.now() < deadline) {
+    if (!(await isRunning(endpoint))) {
+      console.log("clock stopped");
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  console.error("clock is still finishing a restart; it stops afterwards. Run ensure-clock again later.");
+  return false;
 }
 
 async function status(paths: ReturnType<typeof resolvePaths>, waitForKey: boolean): Promise<number> {
@@ -160,8 +169,10 @@ async function status(paths: ReturnType<typeof resolvePaths>, waitForKey: boolea
   if (waitForKey && process.stdin.isTTY) {
     console.log("\npress any key to close");
     process.stdin.setRawMode(true);
+    process.stdin.resume();
     await new Promise((resolve) => process.stdin.once("data", resolve));
     process.stdin.setRawMode(false);
+    process.stdin.pause();
   }
   return 0;
 }

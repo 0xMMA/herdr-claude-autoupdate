@@ -30,6 +30,7 @@ function setup(over: Partial<Config> = {}) {
     herdr,
     config: config(over),
     installed: INSTALLED,
+    defaultModeName: "manual",
     pluginId: "claude-autoupdate",
     pluginRoot: "/plugin",
     stateDir: tempDir(),
@@ -40,7 +41,10 @@ function setup(over: Partial<Config> = {}) {
     },
     now: () => now,
   };
-  return { herdr, deps, logs };
+  const setSessions = (next: ClaudeSession[]) => {
+    sessions = next;
+  };
+  return { herdr, deps, logs, setSessions };
 }
 
 test("R2/R3: restarts in place with the original flags and the live session id", async () => {
@@ -99,7 +103,7 @@ test("R7: the focused pane gets a countdown; a key press cancels", async () => {
 test("R7: when the countdown runs out, the focused pane is restarted", async () => {
   const { herdr, deps } = setup();
   herdr.agentGets = [agent({ focused: true })];
-  herdr.processInfos = [processInfo([CLAUDE]), SHELL_ONLY];
+  herdr.processInfos = [processInfo([CLAUDE]), processInfo([CLAUDE]), SHELL_ONLY];
   herdr.screens = [EMPTY];
   herdr.onOpenPane = (env) => writeFileSync(env.CAU_RESULT!, "proceed");
   assert.equal((await restartPane(candidate(true), deps)).kind, "restarted");
@@ -116,7 +120,7 @@ test("R7: without a popup the focused pane waits unless it has been idle for lon
   herdr.openPaneError = new HerdrError("ui_busy", "modal open");
   const recent = { ...candidate(true), session: { ...OLD, statusUpdatedAt: deps.now() - 60_000 } };
   assert.equal((await restartPane(recent, deps)).kind, "skipped");
-  herdr.processInfos = [processInfo([CLAUDE]), SHELL_ONLY];
+  herdr.processInfos = [processInfo([CLAUDE]), processInfo([CLAUDE]), SHELL_ONLY];
   const longIdle = { ...candidate(true), session: { ...OLD, statusUpdatedAt: deps.now() - 3_600_000 } };
   assert.equal((await restartPane(longIdle, deps)).kind, "restarted");
 });
@@ -205,4 +209,69 @@ test("sameDraft ignores re-wrapping", () => {
   assert.equal(sameDraft("a long\nline", "a long line"), true);
   assert.equal(sameDraft("", ""), false);
   assert.equal(sameDraft("a", "b"), false);
+});
+
+test("R7: a popup that was shown but never answered blocks the restart", async () => {
+  const { herdr, deps } = setup({ focusedUnattendedMinutes: 0 });
+  herdr.agentGets = [agent({ focused: true })];
+  herdr.processInfos = [processInfo([CLAUDE])];
+  herdr.screens = [EMPTY];
+  herdr.onOpenPane = () => {}; // opened, but the answer file never appears
+  assert.deepEqual(await restartPane(candidate(true), deps), { kind: "skipped", reason: "the countdown popup did not answer" });
+  assert.equal(herdr.count("sendKeys"), 0);
+});
+
+test("R5: after the countdown the session file is checked again", async () => {
+  const { herdr, deps, setSessions } = setup();
+  herdr.agentGets = [agent({ focused: true })];
+  herdr.processInfos = [processInfo([CLAUDE])];
+  herdr.screens = [EMPTY];
+  herdr.onOpenPane = (env) => {
+    setSessions([{ ...OLD, status: "busy" }]); // the user sent a prompt meanwhile
+    writeFileSync(env.CAU_RESULT!, "proceed");
+  };
+  assert.deepEqual(await restartPane(candidate(true), deps), { kind: "skipped", reason: "claude is busy" });
+  assert.equal(herdr.count("sendKeys"), 0);
+});
+
+test("R16: a herdr failure after the first key still ends in a recorded failure", async () => {
+  const { herdr, deps } = setup();
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE])];
+  herdr.screens = [EMPTY];
+  herdr.sendKeysError = new HerdrError("timeout", "herdr command timed out");
+  const outcome = await restartPane(candidate(), deps);
+  assert.equal(outcome.kind, "failed");
+  assert.match((outcome as { reason: string }).reason, /interrupted: herdr command timed out/);
+});
+
+test("R6: the draft comes back even when the version check fails afterwards", async () => {
+  const { herdr, deps, setSessions } = setup();
+  herdr.onAgentStart = () => setSessions([session({ pid: 5000, version: "2.1.289" })]);
+  const draft = screen({ promptLines: [`❯${NBSP}keep this`] });
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE]), SHELL_ONLY];
+  herdr.screens = [draft, EMPTY, EMPTY, draft];
+  const outcome = await restartPane(candidate(), deps);
+  assert.deepEqual(outcome, { kind: "failed", reason: "resumed, but still on 2.1.289" });
+  assert.deepEqual(herdr.keys().at(-1), ["up"], "draft recalled before reporting the failure");
+});
+
+test("R3/R16: no mode in the footer resumes in the default mode, not the settings default", async () => {
+  const { herdr, deps } = setup();
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE]), SHELL_ONLY];
+  herdr.screens = [screen({ footer: "  ? for shortcuts" })];
+  await restartPane(candidate(), deps);
+  const args = herdr.calls.find((c) => c.method === "agentStart")!.args[2] as string[];
+  assert.deepEqual(args, ["--model", "sonnet", "--permission-mode", "manual", "--resume", OLD.sessionId]);
+});
+
+test("R16: a retry sends Ctrl+C as a pair again", async () => {
+  const { herdr, deps } = setup();
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE])];
+  herdr.screens = [EMPTY];
+  await restartPane(candidate(), deps);
+  assert.deepEqual(herdr.keys(), [["ctrl+c"], ["ctrl+c"], ["ctrl+c"], ["ctrl+c"]]);
 });

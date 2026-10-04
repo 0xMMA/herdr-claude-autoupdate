@@ -18,6 +18,8 @@ export interface AgentInfo {
   agent_status: AgentStatus;
   focused: boolean;
   name: string | null;
+  /** The pane's shell directory as reported to herdr. */
+  cwd?: string | null;
   launch_pending?: boolean;
   agent_session: { value: string } | null;
 }
@@ -49,17 +51,14 @@ export interface Herdr {
 
 const TIMEOUT_MS = 20_000;
 
-export class HerdrCli implements Herdr {
-  private readonly bin: string;
+/** Runs the herdr binary and resolves with stdout, or rejects with a HerdrError. */
+export type Runner = (args: string[], timeoutMs: number) => Promise<string>;
 
-  constructor(bin: string = process.env.HERDR_BIN_PATH || "herdr") {
-    this.bin = bin;
-  }
-
-  private run(args: string[], timeoutMs = TIMEOUT_MS): Promise<string> {
-    return new Promise((resolve, reject) => {
+export function execRunner(bin: string = process.env.HERDR_BIN_PATH || "herdr"): Runner {
+  return (args, timeoutMs) =>
+    new Promise((resolve, reject) => {
       execFile(
-        this.bin,
+        bin,
         args,
         { timeout: timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" },
         (error, stdout, stderr) => {
@@ -68,6 +67,17 @@ export class HerdrCli implements Herdr {
         },
       );
     });
+}
+
+export class HerdrCli implements Herdr {
+  private readonly runner: Runner;
+
+  constructor(runner: Runner = execRunner()) {
+    this.runner = runner;
+  }
+
+  private run(args: string[], timeoutMs = TIMEOUT_MS): Promise<string> {
+    return this.runner(args, timeoutMs);
   }
 
   private async json(args: string[], timeoutMs?: number): Promise<Record<string, unknown>> {
@@ -121,8 +131,8 @@ export class HerdrCli implements Herdr {
 
   async pluginEnabled(pluginId: string): Promise<boolean | undefined> {
     const result = await this.json(["plugin", "list", "--plugin", pluginId, "--json"]);
-    const plugins = (result.plugins as Array<{ id?: string; enabled?: boolean }> | undefined) ?? [];
-    const plugin = plugins.find((p) => p.id === pluginId);
+    const plugins = (result.plugins as Array<{ plugin_id?: string; enabled?: boolean }> | undefined) ?? [];
+    const plugin = plugins.find((p) => p.plugin_id === pluginId);
     return plugin ? plugin.enabled !== false : undefined;
   }
 }

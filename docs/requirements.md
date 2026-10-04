@@ -45,8 +45,11 @@ outdated Claude pane runs the new version within a few minutes; no user action i
 - Flags that describe how the session runs (`--model`, `--add-dir`, `--mcp-config`, ...)
   are carried over with their values; flags that select or create a session, one-shot
   inputs and unknown flags are dropped and reported.
-- The live permission mode is kept. The session is never resumed with more permissions
-  than it had (`--dangerously-skip-permissions` is downgraded when bypass mode is off).
+- The live permission mode is kept and passed explicitly, also when it is the default
+  mode. The session is never resumed with more permissions than it had
+  (`--dangerously-skip-permissions` is downgraded when bypass mode is off).
+- A session that cannot be resumed in the pane's directory (e.g. started with
+  `--worktree`) is not stopped at all.
 **Source:** Stated. **Verified by:** `args.test.ts`, `screen.test.ts`, `restart.test.ts`, manual check 2.
 
 ## R4 Leave non-Claude panes alone
@@ -68,7 +71,8 @@ is running, no dialog is open, and it has been idle for a minimum time.
   `idle` or `done`.
 - The session has been idle for at least `quiet_seconds` (default 120).
 - The prompt box is visible; when a dialog or selection list is shown instead, the pane waits.
-- All checks are repeated right before acting.
+- All checks are repeated right before acting, and again after the countdown.
+- A pane that has to wait does not hold up other outdated panes.
 **Source:** Stated (idle), derived (details). **Verified by:** `gates.test.ts`, `screen.test.ts`, `restart.test.ts`, manual check 2.
 
 ## R6 Keep an unsent draft
@@ -93,6 +97,7 @@ seconds. Any key cancels; without a reaction the restart happens.
 - Cancelling leaves the pane on its version until the next Claude Code update.
 - When the popup cannot be shown, the focused pane is only restarted after
   `focused_unattended_minutes` (default 30) of idle time.
+- When the popup was shown but did not answer, the pane is not restarted.
 **Source:** Stated. **Verified by:** `countdown.test.ts`, `restart.test.ts`, `manifest.test.ts`, manual check 2.
 
 ## R8 Do not replace Claude Code's updater
@@ -180,5 +185,7 @@ there is a dry-run mode and a readable log.
 
 **Requirement:** The repository, its history and its test fixtures contain no personal
 data. The log stays on the machine and the plugin makes no network connections.
-**Acceptance:** `npm run check:private` passes locally (with personal patterns) and in CI; the code makes no network calls.
+**Acceptance:** `npm run check:private` passes locally (with personal patterns) and in CI;
+the code makes no network calls; the plugin's state directory and files are private to the
+user on Linux and macOS; values of flags that can hold credentials are masked in the log.
 **Source:** Derived. **Verified by:** `scripts/check-private.mjs`, CI.

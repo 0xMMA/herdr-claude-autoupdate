@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { findLauncher, launcherFingerprint, parseSession, readSessions, versionFromInstallPath } from "../src/claude.ts";
+import { defaultModeFromHelp, findLauncher, isAlive, launcherFingerprint, liveSessions, parseSession, readSessions, versionFromInstallPath } from "../src/claude.ts";
 import { session, tempDir, writeSession } from "./helpers.ts";
 
 const LAUNCHER = process.platform === "win32" ? "claude.exe" : "claude";
@@ -60,4 +60,33 @@ test("parses the fields the plugin relies on", () => {
   });
   assert.deepEqual(parsed, { pid: 1, sessionId: "s", cwd: "/x", version: "2.1.289", status: "idle", statusUpdatedAt: 5, kind: "interactive" });
   assert.equal(parseSession(null), undefined);
+});
+
+test("R3: reads the default permission mode name from claude --help", () => {
+  const help = [
+    "  --permission-mode <mode>   Permission mode to use for the session",
+    '                             (choices: "acceptEdits", "auto",',
+    '                             "bypassPermissions", "manual",',
+    '                             "dontAsk", "plan")',
+    "  --plugin-dir <path>        Load a plugin",
+  ].join("\n");
+  assert.equal(defaultModeFromHelp(help), "manual");
+  assert.equal(defaultModeFromHelp(help.replace('"manual"', '"default"')), "default");
+  assert.equal(defaultModeFromHelp("no such option"), undefined);
+});
+
+test("drops session files of dead processes and duplicate session ids", () => {
+  const alive = new Set([1, 2, 3]);
+  const result = liveSessions(
+    [
+      session({ pid: 1, sessionId: "a", statusUpdatedAt: 10 }),
+      session({ pid: 2, sessionId: "a", statusUpdatedAt: 20 }),
+      session({ pid: 9, sessionId: "b" }),
+      session({ pid: 3, sessionId: "c" }),
+    ],
+    (pid) => alive.has(pid),
+  );
+  assert.deepEqual(result.map((s) => `${s.sessionId}:${s.pid}`).sort(), ["a:2", "c:3"]);
+  assert.equal(isAlive(process.pid), true);
+  assert.equal(isAlive(2 ** 30), false);
 });

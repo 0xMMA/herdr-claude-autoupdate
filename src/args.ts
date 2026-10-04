@@ -104,82 +104,107 @@ const isFlag = (token: string): boolean => token.startsWith("-") && token !== "-
 
 export type PermissionMode = "acceptEdits" | "auto" | "bypassPermissions" | "dontAsk" | "plan";
 
+/** One flag with its values, or one stray token. */
+interface Group {
+  tokens: string[];
+  /** Flag name without `=value`; undefined for positional tokens. */
+  name: string | undefined;
+  spec: FlagSpec | undefined;
+}
+
+function parseGroups(argv: readonly string[]): Group[] {
+  const groups: Group[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!;
+    if (token === "--") {
+      for (const rest of argv.slice(i + 1)) groups.push({ tokens: [rest], name: undefined, spec: undefined });
+      break;
+    }
+    if (!isFlag(token)) {
+      groups.push({ tokens: [token], name: undefined, spec: undefined });
+      continue;
+    }
+    const eq = token.startsWith("--") ? token.indexOf("=") : -1;
+    const name = eq > 0 ? token.slice(0, eq) : token;
+    const spec = lookup(name);
+    const tokens = [token];
+    if (spec && eq < 0) {
+      if (spec.arity === "one") {
+        if (i + 1 < argv.length) tokens.push(argv[++i]!);
+      } else if (spec.arity === "optional") {
+        if (i + 1 < argv.length && !isFlag(argv[i + 1]!)) tokens.push(argv[++i]!);
+      } else if (spec.arity === "variadic") {
+        while (i + 1 < argv.length && !isFlag(argv[i + 1]!)) tokens.push(argv[++i]!);
+      }
+    }
+    groups.push({ tokens, name, spec });
+  }
+  return groups;
+}
+
 export interface RebuiltArgs {
   args: string[];
-  /** Unknown flags that were not carried over. Shown in the status output. */
+  /** Unknown flags that were not carried over. Shown in the log. */
   droppedUnknown: string[];
-  /** Number of positional arguments (an initial prompt) that were dropped. */
+  /** Number of positional arguments (an initial prompt, or values of unknown flags) that were dropped. */
   droppedPositionals: number;
 }
 
 /**
- * @param argv          the running process' argv *without* the executable
- * @param sessionId     the live session id (from herdr, not from argv: `/clear` changes it)
- * @param permissionMode the live permission mode read from Claude's footer; `null` means
- *                       "default mode is active", `undefined` means "unknown, keep argv"
+ * @param argv            the running process' argv *without* the executable
+ * @param sessionId       the live session id (from herdr, not from argv: `/clear` changes it)
+ * @param permissionMode  the live permission mode read from Claude's footer; `null` means
+ *                        the footer shows no mode, i.e. the default (manual) mode is active;
+ *                        `undefined` means unknown, keep argv as it is
+ * @param defaultModeName the installed CLI's name for the default mode (`manual`, formerly
+ *                        `default`). Passed explicitly so a `defaultMode` from settings
+ *                        cannot make the resumed session more permissive.
  */
 export function rebuildArgs(
   argv: readonly string[],
   sessionId: string,
   permissionMode?: PermissionMode | null,
+  defaultModeName?: string,
 ): RebuiltArgs {
-  const kept: string[][] = [];
+  let kept: string[][] = [];
   const droppedUnknown: string[] = [];
   let droppedPositionals = 0;
 
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i]!;
-    if (token === "--") {
-      droppedPositionals += argv.length - i - 1;
-      break;
-    }
-    if (!isFlag(token)) {
-      droppedPositionals++;
-      continue;
-    }
-
-    const eq = token.startsWith("--") ? token.indexOf("=") : -1;
-    const name = eq > 0 ? token.slice(0, eq) : token;
-    const spec = lookup(name);
-    if (!spec) {
-      // An unknown flag's value (if any) is a following non-flag token; that one is
-      // counted as a positional and dropped as well.
-      droppedUnknown.push(name);
-      continue;
-    }
-
-    const group = [token];
-    if (eq < 0) {
-      if (spec.arity === "one") {
-        if (i + 1 < argv.length) group.push(argv[++i]!);
-      } else if (spec.arity === "optional") {
-        if (i + 1 < argv.length && !isFlag(argv[i + 1]!)) group.push(argv[++i]!);
-      } else if (spec.arity === "variadic") {
-        while (i + 1 < argv.length && !isFlag(argv[i + 1]!)) group.push(argv[++i]!);
-      }
-    }
-    if (spec.keep) kept.push(group);
+  for (const group of parseGroups(argv)) {
+    if (group.name === undefined) droppedPositionals++;
+    else if (!group.spec) droppedUnknown.push(group.name);
+    else if (group.spec.keep) kept.push(group.tokens);
   }
 
-  let groups = kept;
   if (permissionMode !== undefined) {
-    groups = groups.filter((g) => {
-      const name = g[0]!.split("=")[0];
-      return name !== "--permission-mode";
-    });
+    kept = kept.filter((tokens) => tokens[0]!.split("=")[0] !== "--permission-mode");
     // Never resume more permissive than the live session: if the user cycled away from
     // bypass mode, `--dangerously-skip-permissions` would switch it back on at start.
     if (permissionMode !== "bypassPermissions") {
-      groups = groups.map((g) =>
-        g[0] === "--dangerously-skip-permissions" ? ["--allow-dangerously-skip-permissions"] : g,
+      kept = kept.map((tokens) =>
+        tokens[0] === "--dangerously-skip-permissions" ? ["--allow-dangerously-skip-permissions"] : tokens,
       );
     }
-    if (permissionMode !== null) groups.push(["--permission-mode", permissionMode]);
+    if (permissionMode !== null) kept.push(["--permission-mode", permissionMode]);
+    else if (defaultModeName) kept.push(["--permission-mode", defaultModeName]);
   }
 
   return {
-    args: [...groups.flat(), "--resume", sessionId],
+    args: [...kept.flat(), "--resume", sessionId],
     droppedUnknown,
     droppedPositionals,
   };
+}
+
+/** Flags whose values may hold credentials or long private text. */
+const SENSITIVE = new Set(["--mcp-config", "--settings", "--agents", "--system-prompt", "--append-system-prompt"]);
+
+/** Masks values of sensitive flags before arguments are written to the log. */
+export function redactArgs(args: readonly string[]): string[] {
+  return parseGroups(args).flatMap(({ tokens, name }) => {
+    if (name === undefined || !SENSITIVE.has(name)) return tokens;
+    const [flag, ...values] = tokens;
+    if (flag!.includes("=")) return [`${name}=<redacted>`];
+    return [flag!, ...values.map(() => "<redacted>")];
+  });
 }

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -26,7 +26,15 @@ export class Store {
 
   constructor(dir: string) {
     this.dir = dir;
-    mkdirSync(dir, { recursive: true });
+    // The log can hold draft text: keep the directory private to the user (R17).
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") {
+      try {
+        chmodSync(dir, 0o700);
+      } catch {
+        // not ours to change; files below are still created private
+      }
+    }
   }
 
   get logPath(): string {
@@ -72,7 +80,7 @@ export class Store {
       // no log yet
     }
     try {
-      appendFileSync(this.logPath, `${now.toISOString()} ${message}\n`);
+      appendFileSync(this.logPath, `${now.toISOString()} ${message}\n`, { mode: 0o600 });
     } catch {
       // logging must never break the clock
     }
@@ -90,6 +98,6 @@ export class Store {
 
 export function writeAtomic(path: string, content: string): void {
   const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, content);
+  writeFileSync(tmp, content, { mode: 0o600 });
   renameSync(tmp, path);
 }

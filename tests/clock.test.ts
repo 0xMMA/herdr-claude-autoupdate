@@ -26,9 +26,22 @@ function setup(configJson: Record<string, unknown>) {
   const paths = resolvePaths(env);
   const herdr = new FakeHerdr();
   const store = new Store(paths.stateDir);
-  const clock = new Clock({ paths, store, herdr, pluginId: "claude-autoupdate", pluginRoot: root, herdrSocket: undefined, env });
-  return { clock, herdr, paths, store, launcher: join(bin, LAUNCHER) };
+  const clock = new Clock({
+    paths,
+    store,
+    herdr,
+    pluginId: "claude-autoupdate",
+    pluginRoot: root,
+    herdrSocket: undefined,
+    env,
+    isAlive: () => true,
+  });
+  const writeConfig = (json: Record<string, unknown>) =>
+    writeFileSync(join(env.HERDR_PLUGIN_CONFIG_DIR, "config.json"), `${JSON.stringify(json)}\n`);
+  return { clock, herdr, paths, store, launcher: join(bin, LAUNCHER), writeConfig };
 }
+
+const PROMPT_BOX = ["─".repeat(20), "❯ ", "─".repeat(20), "  ? for shortcuts"].join("\n");
 
 test("R11: idle mode makes no herdr calls", async () => {
   const { clock, herdr, paths } = setup({ fake_installed_version: "2.1.290" });
@@ -79,6 +92,54 @@ test("R4/R10: outdated sessions outside herdr do not keep the clock busy", async
   await clock.check();
   assert.equal(clock.snapshot().mode, "idle");
   assert.equal(herdr.count("sendKeys") + herdr.count("agentStart"), 0);
+});
+
+test("changing or removing fake_installed_version takes effect", async () => {
+  const { clock, paths, writeConfig } = setup({ fake_installed_version: "9.9.9" });
+  writeSession(paths.sessionsDir, session({ version: "2.1.290" }));
+  await clock.check();
+  assert.equal(clock.snapshot().installed, "9.9.9");
+
+  writeConfig({ fake_installed_version: "2.1.290", extra_padding_to_change_size: true });
+  await clock.check();
+  assert.equal(clock.snapshot().installed, "2.1.290");
+
+  // Without the fake, the real launcher is asked; the test launcher cannot answer.
+  writeConfig({});
+  await clock.check();
+  assert.equal(clock.snapshot().installed, undefined);
+});
+
+test("R1: a pane that is skipped right before acting does not block the others", async () => {
+  const { clock, herdr, paths, store } = setup({ fake_installed_version: "2.1.290", dry_run: true, quiet_seconds: 0 });
+  writeSession(paths.sessionsDir, session({ pid: 1, sessionId: "first", version: "2.1.289", statusUpdatedAt: 1 }));
+  writeSession(paths.sessionsDir, session({ pid: 2, sessionId: "second", version: "2.1.289", statusUpdatedAt: 2 }));
+  const a = agent({ pane_id: "w1:p1", agent_session: { value: "first" } });
+  const b = agent({ pane_id: "w1:p2", agent_session: { value: "second" } });
+  herdr.agents = [a, b];
+  // "first" goes first (idle longest) but is busy again by the time it is re-checked.
+  herdr.agentGets = [{ ...a, agent_status: "working" }, b];
+  herdr.processInfos = [{ pane_id: "w1:p2", shell_pid: 1, foreground_processes: [{ pid: 2, name: "claude", argv: ["claude"] }] }];
+  herdr.screens = [PROMPT_BOX];
+
+  await clock.check();
+  const marks = store.readMarks();
+  assert.equal(marks.second?.result, "dry-run");
+  assert.equal(marks.first, undefined);
+  const first = clock.snapshot().panes.find((p) => p.sessionId === "first")!;
+  assert.equal(first.status, "waiting: herdr: working");
+  assert.equal(clock.snapshot().mode, "update", "the skipped pane is still pending");
+});
+
+test("R11: while no outdated session is idle, herdr is not asked again", async () => {
+  const { clock, herdr, paths } = setup({ fake_installed_version: "2.1.290" });
+  writeSession(paths.sessionsDir, session({ version: "2.1.289", status: "busy" }));
+  herdr.agents = [agent()];
+  await clock.check();
+  const calls = herdr.count("agentList");
+  for (let i = 0; i < 3; i++) await clock.check();
+  assert.equal(herdr.count("agentList"), calls);
+  assert.equal(clock.snapshot().mode, "update");
 });
 
 test("a disabled plugin stops the clock", async () => {
