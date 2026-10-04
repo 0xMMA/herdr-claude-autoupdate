@@ -21,7 +21,7 @@ command = ["node", "bin/claude-autoupdate.mjs", "live"]
 [[actions]]
 id = "dry-run"
 title = "Claude auto-update: dry run"
-description = "Turn dry run back on: only log what would be restarted"
+description = "Turn dry run back on (only log what would be restarted) and make sure the clock is running"
 contexts = ["workspace"]
 command = ["node", "bin/claude-autoupdate.mjs", "dry-run"]
 

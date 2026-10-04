@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { writeAtomic } from "./store.ts";
 
@@ -97,7 +97,7 @@ export function loadConfig(configDir: string): LoadedConfig {
     return parseConfig(undefined);
   }
   try {
-    return parseConfig(JSON.parse(text));
+    return parseConfig(JSON.parse(stripBom(text)));
   } catch (error) {
     return { config: { ...DEFAULT_CONFIG }, warnings: [`config.json is not valid JSON (${(error as Error).message}); using defaults`] };
   }
@@ -108,7 +108,12 @@ export function loadConfig(configDir: string): LoadedConfig {
  * Refuses to touch a file it cannot parse, so a hand-edited config is never lost.
  */
 export function writeDryRun(configDir: string, dryRun: boolean): { ok: true } | { ok: false; error: string } {
-  const path = join(configDir, CONFIG_FILE);
+  let path = join(configDir, CONFIG_FILE);
+  try {
+    path = realpathSync(path); // keep a symlinked config (e.g. from a dotfiles repo) a symlink
+  } catch {
+    // does not exist yet
+  }
   let current: Record<string, unknown> = {};
   let text: string | undefined;
   try {
@@ -121,7 +126,7 @@ export function writeDryRun(configDir: string, dryRun: boolean): { ok: true } | 
   if (text !== undefined && text.trim() !== "") {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(stripBom(text));
     } catch {
       return { ok: false, error: `${path} is not valid JSON; fix or delete it first` };
     }
@@ -130,8 +135,17 @@ export function writeDryRun(configDir: string, dryRun: boolean): { ok: true } | 
     }
     current = parsed as Record<string, unknown>;
   }
-  mkdirSync(configDir, { recursive: true });
-  writeAtomic(path, `${JSON.stringify({ ...current, dry_run: dryRun }, null, 2)}
-`);
+  try {
+    mkdirSync(configDir, { recursive: true });
+    writeAtomic(path, `${JSON.stringify({ ...current, dry_run: dryRun }, null, 2)}\n`);
+  } catch (error) {
+    // e.g. the rename is refused on Windows while the file is being read; nothing changed
+    return { ok: false, error: `cannot write ${path}: ${(error as Error).message}; try again` };
+  }
   return { ok: true };
+}
+
+/** Editors on Windows (Notepad, PowerShell 5.1) may save JSON with a UTF-8 byte order mark. */
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }

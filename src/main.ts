@@ -43,11 +43,16 @@ export async function main(argv: readonly string[]): Promise<number> {
         console.error(written.error);
         return 1;
       }
-      console.log(live ? "live: idle, outdated Claude panes will be restarted" : "dry run: the plugin only logs what it would do");
       const code = await ensureClock(paths.clockEndpoint);
+      if (code !== 0) return code;
       // Apply now instead of at the next interval.
-      if (code === 0) await request(paths.clockEndpoint, "tick").catch(() => undefined);
-      return code;
+      await request(paths.clockEndpoint, "tick").catch(() => undefined);
+      console.log(
+        live
+          ? "live: idle, outdated Claude panes will be restarted"
+          : "dry run: the plugin only logs what it would do (also stops a restart that is about to start)",
+      );
+      return 0;
     }
     case "restart-clock":
       if (!(await stopClock(paths.clockEndpoint))) return 1;
@@ -151,7 +156,7 @@ async function status(paths: ReturnType<typeof resolvePaths>, waitForKey: boolea
     lines.push(`clock:      running (pid ${snapshot.pid}), ${snapshot.mode} mode`);
     lines.push(`last check: ${snapshot.lastCheckAt ? new Date(snapshot.lastCheckAt).toLocaleString() : "not yet"}`);
     lines.push(`claude:     ${snapshot.launcher ?? "not found (set claude_path in config.json)"} (${snapshot.installed ?? "version unknown"})`);
-    lines.push(`dry run:    ${snapshot.config.dryRun ? "yes (set \"dry_run\": false in config.json to act)" : "no"}`);
+    lines.push(`dry run:    ${snapshot.config.dryRun ? "yes (run the live action to act)" : "no"}`);
     for (const warning of snapshot.configWarnings) lines.push(`config:     ${warning}`);
     lines.push("");
     if (snapshot.panes.length === 0) lines.push("no outdated Claude sessions");

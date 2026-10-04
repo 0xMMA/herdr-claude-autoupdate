@@ -424,6 +424,7 @@ export class Clock {
       stateDir: this.ctx.paths.stateDir,
       readSessions: () => readSessions(this.ctx.paths.sessionsDir),
       isAlive: this.ctx.isAlive ?? isAlive,
+      dryRunNow: () => loadConfig(this.ctx.paths.configDir).config.dryRun,
       log: (message: string) => this.log(message),
       sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
       now: () => Date.now(),

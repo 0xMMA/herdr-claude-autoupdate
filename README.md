@@ -76,9 +76,10 @@ Or do both in one go:
 herdr plugin install 0xMMA/herdr-claude-autoupdate --yes && herdr plugin action invoke claude-autoupdate.live
 ```
 
-`ensure-clock` and `live` start the background process right away; after that herdr
-starts it on every server start. `live` sets `"dry_run": false` in `config.json` and keeps
-your other settings; `dry-run` switches back.
+`ensure-clock`, `live` and `dry-run` start the background process right away if it is not
+running; after that herdr starts it on every server start. `live` sets `"dry_run": false`
+in `config.json` and keeps your other settings; `dry-run` switches back, and also stops a
+restart that is just about to send its first key.
 
 For remote machines you can run it from your workstation over SSH (use a login shell so
 `herdr` is on the `PATH`):

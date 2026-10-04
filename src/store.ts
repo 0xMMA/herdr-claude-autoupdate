@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -99,5 +99,14 @@ export class Store {
 export function writeAtomic(path: string, content: string): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, content, { mode: 0o600 });
-  renameSync(tmp, path);
+  try {
+    renameSync(tmp, path);
+  } catch (error) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // nothing left to clean up
+    }
+    throw error;
+  }
 }

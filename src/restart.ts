@@ -26,6 +26,8 @@ export interface RestartDeps {
   stateDir: string;
   readSessions(): ClaudeSession[];
   isAlive(pid: number): boolean;
+  /** Reads dry run from config.json now, so switching it on stops a restart that is about to happen. */
+  dryRunNow(): boolean;
   log(message: string): void;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -146,7 +148,7 @@ export async function restartPane(candidate: Assessment, deps: RestartDeps): Pro
   if (rebuilt.droppedPositionals > 0) {
     deps.log(`${paneId}: not carrying over ${rebuilt.droppedPositionals} positional argument(s)`);
   }
-  if (config.dryRun) return { kind: "dry-run", args: rebuilt.args };
+  if (config.dryRun || deps.dryRunNow()) return { kind: "dry-run", args: rebuilt.args };
 
   // From the first key on, any error must still end in a recorded outcome.
   try {

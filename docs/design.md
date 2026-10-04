@@ -51,6 +51,11 @@ longer exist are ignored, and duplicate files for one session id are collapsed.
 searches `PATH`, then the standard install locations (`~/.local/bin`, `/opt/homebrew/bin`,
 `/usr/local/bin`, `/usr/bin`), unless `claude_path` is set.
 
+**Switching dry run.** The `live` and `dry-run` actions rewrite only `dry_run` in
+`config.json` (other settings are kept, an unparsable file is left alone), make sure the
+clock runs and send it a `tick`. Right before its first key, a restart reads `config.json`
+again, so switching to dry run also stops a restart that is about to happen.
+
 **Single instance and control.** The clock listens on a local socket (a named pipe on
 Windows), keyed by the herdr server's socket path. The operating system releases it when
 the process dies, so it works as a lock without heartbeats, and the `tick`, `status` and

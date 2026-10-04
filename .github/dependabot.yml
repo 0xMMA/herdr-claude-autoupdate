@@ -11,3 +11,7 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # Types must match the oldest supported Node.js (22.18), not the newest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]

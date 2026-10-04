@@ -36,6 +36,7 @@ function setup(over: Partial<Config> = {}) {
     stateDir: tempDir(),
     readSessions: () => sessions,
     isAlive: () => true,
+    dryRunNow: () => false,
     log: (m) => logs.push(m),
     sleep: async (ms) => {
       now += ms;
@@ -318,4 +319,14 @@ test("R16: a retry sends Ctrl+C as a pair again", async () => {
   herdr.screens = [EMPTY];
   await restartPane(candidate(), deps);
   assert.deepEqual(herdr.keys(), [["ctrl+c"], ["ctrl+c"], ["ctrl+c"], ["ctrl+c"]]);
+});
+
+test("R16: switching to dry run stops a restart that is about to start", async () => {
+  const { herdr, deps } = setup();
+  deps.dryRunNow = () => true; // the user ran the dry-run action a moment ago
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE])];
+  herdr.screens = [EMPTY];
+  assert.equal((await restartPane(candidate(), deps)).kind, "dry-run");
+  assert.equal(herdr.count("sendKeys"), 0);
 });
