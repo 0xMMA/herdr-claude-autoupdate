@@ -63,7 +63,8 @@ export function execRunner(bin: string = process.env.HERDR_BIN_PATH || "herdr"):
         { timeout: timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" },
         (error, stdout, stderr) => {
           if (!error) return resolve(stdout);
-          reject(toHerdrError(error, stderr || stdout));
+          // execFile's own message repeats the full command line, which can hold flag values.
+          reject(toHerdrError(error, stderr || stdout, `herdr ${args.slice(0, 2).join(" ")}`));
         },
       );
     });
@@ -137,7 +138,7 @@ export class HerdrCli implements Herdr {
   }
 }
 
-export function toHerdrError(error: Error & { code?: unknown; killed?: boolean }, output: string): HerdrError {
+export function toHerdrError(error: Error & { code?: unknown; killed?: boolean }, output: string, label = "herdr"): HerdrError {
   if (error.killed) return new HerdrError("timeout", "herdr command timed out");
   if (error.code === "ENOENT") return new HerdrError("herdr_not_found", "herdr binary not found");
   try {
@@ -146,6 +147,6 @@ export function toHerdrError(error: Error & { code?: unknown; killed?: boolean }
   } catch {
     // not JSON
   }
-  const text = output.trim() || error.message;
+  const text = output.trim() || `${label} failed${typeof error.code === "number" ? ` (exit ${error.code})` : ""}`;
   return new HerdrError(/server.*not running|connect/i.test(text) ? "server_not_running" : "herdr_failed", text);
 }

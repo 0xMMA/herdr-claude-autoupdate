@@ -17,6 +17,9 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Unsent prompt drafts are moved through Claude Code's input history and restored.
 - Countdown popup before restarting the focused pane; any key cancels.
 - Dry-run mode (default), status popup, `tick`, `ensure-clock`, `restart-clock` and `stop-clock` actions.
+- Safety checks: sessions in folders Claude does not trust permanently (e.g. the home
+  directory), sessions started in another directory (`--worktree`) and panes showing a
+  dialog are never restarted; a pane that has to wait does not hold up the others.
 - Requirements specification (`docs/requirements.md`) and design notes (`docs/design.md`).
 
 [Unreleased]: https://github.com/0xMMA/herdr-claude-autoupdate/compare/v0.1.0...HEAD

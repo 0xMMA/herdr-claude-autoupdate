@@ -73,6 +73,9 @@ is running, no dialog is open, and it has been idle for a minimum time.
 - The prompt box is visible; when a dialog or selection list is shown instead, the pane waits.
 - All checks are repeated right before acting, and again after the countdown.
 - A pane that has to wait does not hold up other outdated panes.
+- A session whose folder Claude does not trust permanently (it would ask again on start,
+  e.g. the home directory) is never restarted; the restarted Claude would stop at a
+  dialog whose default answer exits.
 **Source:** Stated (idle), derived (details). **Verified by:** `gates.test.ts`, `screen.test.ts`, `restart.test.ts`, manual check 2.
 
 ## R6 Keep an unsent draft

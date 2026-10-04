@@ -95,6 +95,19 @@ export interface Assessment {
  * Pairs Claude sessions with herdr panes by session id and decides which ones may be
  * restarted now. Sessions outside herdr are reported but never acted on (R4, R10).
  */
+export interface AssessOptions {
+  /** The agent list was fetched in this check. A session missing from an older list is not final. */
+  agentsFresh: boolean;
+  /**
+   * Whether Claude starts in this folder without a trust dialog (see `isTrustedFolder`);
+   * `undefined` when that cannot be told right now. Only called for sessions that passed
+   * every other gate.
+   */
+  isTrusted: (cwd: string) => boolean | undefined;
+}
+
+const DEFAULT_ASSESS: AssessOptions = { agentsFresh: true, isTrusted: () => true };
+
 export function assess(
   sessions: readonly ClaudeSession[],
   agents: readonly AgentInfo[],
@@ -102,8 +115,7 @@ export function assess(
   marks: Marks,
   now: number,
   config: GateConfig,
-  /** Whether Claude starts in this folder without a trust dialog (see `isTrustedFolder`). */
-  isTrusted: (cwd: string) => boolean = () => true,
+  options: AssessOptions = DEFAULT_ASSESS,
 ): Assessment[] {
   const bySession = new Map<string, AgentInfo>();
   for (const agent of agents) {
@@ -116,14 +128,21 @@ export function assess(
     const agent = bySession.get(session.sessionId);
     const outdated = isOlder(session.version, installed);
     if (!agent) {
-      if (outdated) out.push({ session, agent, outdated, verdict: never("not in a herdr pane on this server") });
+      if (outdated) {
+        const verdict = options.agentsFresh
+          ? never("not in a herdr pane on this server")
+          : wait("pane not known yet (herdr is asked once the session is idle)");
+        out.push({ session, agent, outdated, verdict });
+      }
       continue;
     }
     let verdict = sessionGate(session, installed, marks[session.sessionId], now, config);
     if (verdict.ok) verdict = paneGate(agent, session);
     // A restart would stop at Claude's trust dialog, whose default answer exits.
-    if (verdict.ok && !isTrusted(session.cwd)) {
-      verdict = never("folder not trusted permanently (e.g. the home directory); restart it yourself");
+    if (verdict.ok) {
+      const trusted = options.isTrusted(session.cwd);
+      if (trusted === undefined) verdict = wait("cannot read Claude's trusted folders right now");
+      else if (!trusted) verdict = never("folder not trusted permanently (e.g. the home directory); restart it yourself");
     }
     out.push({ session, agent, outdated, verdict });
   }

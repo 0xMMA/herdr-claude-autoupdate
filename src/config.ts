@@ -73,7 +73,7 @@ export function parseConfig(raw: unknown): LoadedConfig {
       if (typeof value === "boolean") config[key] = value;
       else warnings.push(`${name} must be true or false; using ${config[key]}`);
     } else if (name === "fake_installed_version") {
-      if (typeof value === "string" || value === null) config.fakeInstalledVersion = value ?? undefined;
+      if (typeof value === "string" || value === null) config.fakeInstalledVersion = value || undefined;
       else warnings.push("fake_installed_version must be a string");
     } else {
       warnings.push(`unknown setting ${name} ignored`);

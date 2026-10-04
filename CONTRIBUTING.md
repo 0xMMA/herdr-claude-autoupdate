@@ -75,8 +75,12 @@ Unit tests cannot cover herdr and Claude Code themselves. Before a release, chec
    clock's CPU time is practically zero and the log contains no herdr calls. With
    `"fake_installed_version": "9.9.9"` and `tick`, the status lists every Claude pane with a
    reason and no other panes; the log only says "dry run, would restart".
-2. **Real restarts in a separate herdr session** (`herdr --session cau-test`), with
-   `dry_run: false` and `fake_installed_version` set:
+2. **Real restarts in a separate herdr session** (`herdr --session cau-test server` starts
+   one headless), with `dry_run: false` and `fake_installed_version` set. The plugin config
+   is per user, so stop the clock of your main herdr server first (`stop-clock`) and start
+   it again afterwards. Run the test Claude sessions in a folder Claude trusts without
+   asking (not your home directory, and not a git repository without its own trust entry),
+   for example a new non-git folder below a trusted one:
    - an unfocused pane started with `--model sonnet --add-dir <dir>` restarts in place with
      the same session id and flags (compare `herdr pane process-info` before and after);
    - the focused pane shows the countdown; a key cancels, otherwise it restarts;

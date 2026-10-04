@@ -35,6 +35,7 @@ function setup(over: Partial<Config> = {}) {
     pluginRoot: "/plugin",
     stateDir: tempDir(),
     readSessions: () => sessions,
+    isAlive: () => true,
     log: (m) => logs.push(m),
     sleep: async (ms) => {
       now += ms;
@@ -265,6 +266,49 @@ test("R3/R16: no mode in the footer resumes in the default mode, not the setting
   await restartPane(candidate(), deps);
   const args = herdr.calls.find((c) => c.method === "agentStart")!.args[2] as string[];
   assert.deepEqual(args, ["--model", "sonnet", "--permission-mode", "manual", "--resume", OLD.sessionId]);
+});
+
+test("R3: a session started with --worktree is not touched", async () => {
+  const { herdr, deps } = setup();
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([{ ...CLAUDE, argv: ["claude", "-w", "feature"] }])];
+  herdr.screens = [EMPTY];
+  const outcome = await restartPane(candidate(), deps);
+  assert.equal(outcome.kind, "unsupported");
+  assert.equal(herdr.count("sendKeys"), 0);
+});
+
+test("R3/R16: without the default mode's name, a pane in default mode waits", async () => {
+  const { herdr, deps } = setup();
+  deps.defaultModeName = undefined;
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE])];
+  herdr.screens = [screen({ footer: "  ? for shortcuts" })];
+  assert.deepEqual(await restartPane(candidate(), deps), { kind: "skipped", reason: "the default permission mode name is not known yet" });
+  assert.equal(herdr.count("sendKeys"), 0);
+});
+
+test("R16: a leftover session file of an earlier process is not taken for the resumed one", async () => {
+  const { herdr, deps, setSessions } = setup();
+  const stale = session({ pid: 777, version: INSTALLED }); // same session id, crashed earlier
+  setSessions([OLD, stale]);
+  herdr.onAgentStart = () => setSessions([stale]); // the resume never comes up
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE]), SHELL_ONLY];
+  herdr.screens = [EMPTY];
+  assert.deepEqual(await restartPane(candidate(), deps), { kind: "failed", reason: "the resumed session did not come up" });
+});
+
+test("R6: a herdr error while recalling the draft does not turn a restart into a failure", async () => {
+  const { herdr, deps, setSessions } = setup();
+  herdr.onAgentStart = () => {
+    setSessions([session({ pid: 5000, version: INSTALLED })]);
+    herdr.sendKeysError = new HerdrError("timeout", "herdr command timed out");
+  };
+  herdr.agentGets = [agent()];
+  herdr.processInfos = [processInfo([CLAUDE]), SHELL_ONLY];
+  herdr.screens = [screen({ promptLines: [`❯${NBSP}my draft`] }), EMPTY, EMPTY];
+  assert.deepEqual(await restartPane(candidate(), deps), { kind: "restarted", draftRestored: false });
 });
 
 test("R16: a retry sends Ctrl+C as a pair again", async () => {

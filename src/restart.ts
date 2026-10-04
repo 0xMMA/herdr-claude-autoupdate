@@ -25,6 +25,7 @@ export interface RestartDeps {
   pluginRoot: string;
   stateDir: string;
   readSessions(): ClaudeSession[];
+  isAlive(pid: number): boolean;
   log(message: string): void;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -37,7 +38,9 @@ export type Outcome =
   /** Not now; try again on a later check. Nothing is recorded. */
   | { kind: "skipped"; reason: string }
   /** Recorded; no further attempt for this session until the next Claude version. */
-  | { kind: "failed"; reason: string };
+  | { kind: "failed"; reason: string }
+  /** Cannot be restarted in place at all; recorded like a failure, but nothing was touched. */
+  | { kind: "unsupported"; reason: string };
 
 /**
  * `unavailable`: the popup could not be opened at all.
@@ -114,6 +117,14 @@ export async function restartPane(candidate: Assessment, deps: RestartDeps): Pro
 
   let fresh = await freshCheck(candidate, deps);
   if (typeof fresh === "string") return { kind: "skipped", reason: fresh };
+  // A worktree session lives elsewhere; `claude --resume` in the pane's directory would not find it.
+  if ((fresh.proc.argv ?? []).some((a) => a === "--worktree" || a === "-w" || a.startsWith("--worktree="))) {
+    return { kind: "unsupported", reason: "started with --worktree; resume it yourself" };
+  }
+  // Without the CLI's name for the default mode, settings could widen the permissions on resume.
+  if (fresh.screen.permissionMode === null && !deps.defaultModeName) {
+    return { kind: "skipped", reason: "the default permission mode name is not known yet" };
+  }
 
   if (fresh.agent.focused && !config.dryRun) {
     const answer = await askViaCountdown(deps, paneId, `${paneId} · ${basename(session.cwd) || session.sessionId.slice(0, 8)}`);
@@ -149,6 +160,9 @@ async function act(candidate: Assessment, fresh: Fresh, rebuilt: RebuiltArgs, de
   const { session } = candidate;
   const paneId = candidate.agent!.pane_id;
   const { herdr } = deps;
+
+  // Any file for this session that exists now is not the resumed process.
+  const before = new Set(deps.readSessions().filter((s) => s.sessionId === session.sessionId).map((s) => s.pid));
 
   // R6: park the draft in Claude's input history before the process goes away.
   const draft = fresh.screen.prompt === "draft" ? fresh.screen.draft : undefined;
@@ -192,7 +206,9 @@ async function act(candidate: Assessment, fresh: Fresh, rebuilt: RebuiltArgs, de
   let resumed: ClaudeSession | undefined;
   await waitFor(
     () => {
-      resumed = deps.readSessions().find((s) => s.sessionId === session.sessionId && s.pid !== session.pid);
+      resumed = deps
+        .readSessions()
+        .find((s) => s.sessionId === session.sessionId && !before.has(s.pid) && deps.isAlive(s.pid));
       return resumed !== undefined;
     },
     VERIFY_TIMEOUT_MS,
@@ -218,6 +234,16 @@ async function act(candidate: Assessment, fresh: Fresh, rebuilt: RebuiltArgs, de
 }
 
 async function restoreDraft(deps: RestartDeps, paneId: string, draft: string): Promise<boolean> {
+  try {
+    return await recallDraft(deps, paneId, draft);
+  } catch (error) {
+    // The restart itself succeeded; a herdr hiccup here must not turn it into a failure.
+    deps.log(`${paneId}: could not recall the draft (${(error as Error).message}); it is in Claude's input history (press Up) and in this log`);
+    return false;
+  }
+}
+
+async function recallDraft(deps: RestartDeps, paneId: string, draft: string): Promise<boolean> {
   const { herdr } = deps;
   let restored = false;
   const ready = await waitFor(async () => (await screenOf(deps, paneId)).prompt === "empty", 15_000, 500, deps);

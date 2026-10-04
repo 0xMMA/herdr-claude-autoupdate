@@ -69,3 +69,12 @@ test("maps herdr's JSON errors", () => {
   assert.equal(toHerdrError(Object.assign(new Error("spawn"), { code: "ENOENT" }), "").code, "herdr_not_found");
   assert.equal(toHerdrError(Object.assign(new Error("t"), { killed: true }), "").code, "timeout");
 });
+
+test("R17: errors without herdr output do not repeat the command line", () => {
+  const error = toHerdrError(
+    Object.assign(new Error("Command failed: herdr agent start x --settings {\"token\":\"s3cret\"}"), { code: 1 }),
+    "",
+    "herdr agent start",
+  );
+  assert.equal(error.message, "herdr agent start failed (exit 1)");
+});

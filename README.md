@@ -147,6 +147,7 @@ Start with the status action; it shows each outdated pane with the reason it is 
 | `focused and the countdown could not be shown` | Another herdr popup or modal was open. It retries. |
 | `waiting: …` | The pane was skipped right before acting (reason shown); it is retried after 3 minutes, other panes go first. |
 | `session directory differs from the pane's shell directory` | The session lives in another directory (e.g. started with `--worktree`) and cannot be resumed in place. Restart it yourself. |
+| `folder not trusted permanently` | Claude would ask "Do you trust this folder?" on start (always in your home directory, and in git repositories without their own trust entry). Restart it yourself, or start Claude there once and answer the trust question. |
 | `not in a herdr pane on this server` | The session runs outside herdr, on another machine, or herdr's Claude integration is missing. It is never touched. |
 | `failed: …` | See the log. The pane is not retried until the next Claude Code version. |
 | `clock: NOT running` | Run the `ensure-clock` action. |

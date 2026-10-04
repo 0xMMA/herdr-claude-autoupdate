@@ -114,6 +114,12 @@ test("R16: folder trust comes from Claude's config; the home directory never cou
   assert.equal(readTrustedFolders(join(dir, "missing.json")), undefined);
 });
 
+test("R16: inside a trusted repository, sub-folders are trusted too", () => {
+  const trusted = ["/srv/repo"];
+  assert.equal(isTrustedFolder("/srv/repo/packages/app", trusted, "/home/u", "/srv/repo"), true);
+  assert.equal(isTrustedFolder("/srv/repo", trusted, "/home/u", "/srv/repo"), true);
+});
+
 test("finds the git repository root", () => {
   const repo = tempDir();
   mkdirSync(join(repo, ".git"));

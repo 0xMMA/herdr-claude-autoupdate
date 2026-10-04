@@ -6,6 +6,7 @@ import {
   defaultModeName,
   findGitRoot,
   findLauncher,
+  isAlive,
   installedVersion,
   isTrustedFolder,
   launcherFingerprint,
@@ -43,6 +44,8 @@ export interface ClockContext {
   isAlive?: (pid: number) => boolean;
   /** The user's home directory; injectable for tests. */
   home?: string;
+  /** Git root lookup; injectable for tests. */
+  findGitRoot?: (dir: string) => string | undefined;
 }
 
 export type Mode = "idle" | "update";
@@ -61,6 +64,7 @@ export interface ClockSnapshot {
 
 const MAX_HERDR_FAILURES = 3;
 const MAX_SOCKET_MISSES = 3;
+const MAX_LOOKUP_FAILURES = 3;
 /** A pane that was skipped right before acting is retried after this long; others go first. */
 const SKIP_BACKOFF_MS = 3 * 60_000;
 /** After this many update-mode checks without a restart, check less often. */
@@ -87,6 +91,8 @@ export class Clock {
   private readonly lastReasons = new Map<string, string>();
   private unproductiveChecks = 0;
   private herdrFailures = 0;
+  private lookupFailures = 0;
+  private defaultModeAttempts = 0;
   private socketMisses = 0;
   private forced = false;
   private stopping = false;
@@ -211,7 +217,8 @@ export class Clock {
 
     const installed = await this.resolveInstalled(fingerprint);
     if (!installed) {
-      this.mode = "idle";
+      // A few retries (e.g. an antivirus scan of a fresh binary), then wait for the next change.
+      if (this.lookupFailures >= MAX_LOOKUP_FAILURES) this.enterIdle("installed version unknown");
       return;
     }
 
@@ -229,9 +236,11 @@ export class Clock {
     const actionable = outdated.some(
       (s) => sessionGate(s, installed, marks[s.sessionId], now, this.config).ok && !this.inBackoff(s, now),
     );
+    let agentsFresh = false;
     if (actionable || this.agents.length === 0) {
       try {
         this.agents = await this.ctx.herdr.agentList();
+        agentsFresh = true;
         if ((await this.ctx.herdr.pluginEnabled(this.ctx.pluginId)) === false) {
           this.log("plugin is disabled; stopping");
           this.stopping = true;
@@ -244,12 +253,20 @@ export class Clock {
       }
     }
 
-    const trusted = readTrustedFolders(this.ctx.paths.claudeConfigFile);
-    if (!trusted) this.log(`cannot read ${this.ctx.paths.claudeConfigFile}; no folder counts as trusted`);
+    // Claude's config is read at most once per check, and only when a session reaches the trust gate.
+    let trusted: string[] | undefined | null = null;
     const home = this.ctx.home ?? homedir();
-    this.assessments = assess(sessions, this.agents, installed, marks, now, this.config, (cwd) =>
-      trusted ? isTrustedFolder(cwd, trusted, home, findGitRoot(cwd)) : false,
-    );
+    const gitRoot = this.ctx.findGitRoot ?? findGitRoot;
+    this.assessments = assess(sessions, this.agents, installed, marks, now, this.config, {
+      agentsFresh,
+      isTrusted: (cwd) => {
+        if (trusted === null) {
+          trusted = readTrustedFolders(this.ctx.paths.claudeConfigFile);
+          if (!trusted) this.log(`cannot read ${this.ctx.paths.claudeConfigFile}; trying again later`);
+        }
+        return trusted ? isTrustedFolder(cwd, trusted, home, gitRoot(cwd)) : undefined;
+      },
+    });
     this.logReasonChanges();
     this.ctx.store.pruneMarks(new Set(sessions.map((s) => s.sessionId)), now);
 
@@ -263,14 +280,17 @@ export class Clock {
   private async restartOne(installed: string, now: number): Promise<boolean> {
     const candidates = restartCandidates(this.assessments).filter((a) => !this.inBackoff(a.session, now));
     for (const candidate of candidates) {
+      if (this.stopping) return false;
       let outcome: Outcome;
       try {
         outcome = await restartPane(candidate, await this.restartDeps(installed));
       } catch (error) {
         // Only the read-only checks can throw here; nothing was sent to the pane.
+        const reason = `check failed: ${(error as Error).message}`;
         if (error instanceof HerdrError) this.onHerdrError(error);
-        else this.log(`check of ${candidate.agent?.pane_id} failed: ${(error as Error).message}`);
-        return false;
+        else this.log(`${candidate.agent?.pane_id}: ${reason}`);
+        this.skipped.set(candidate.session.sessionId, { until: Date.now() + SKIP_BACKOFF_MS, reason });
+        continue;
       }
       await this.record(candidate, outcome, installed);
       if (outcome.kind === "skipped") {
@@ -292,23 +312,36 @@ export class Clock {
   private async resolveInstalled(fingerprint: string): Promise<string | undefined> {
     const fake = this.config.fakeInstalledVersion;
     const key = fake ? `fake:${fake}` : `real:${fingerprint}`;
-    if (key === this.installedKey && this.installed) return this.installed;
-    this.installedKey = key;
-    this.installed = undefined;
-    try {
-      this.installed = fake ?? (await installedVersion(this.launcher!));
-    } catch (error) {
-      this.log(`could not run ${this.launcher} --version: ${(error as Error).message}`);
+    if (key !== this.installedKey) {
+      this.installedKey = key;
+      this.installed = undefined;
+      this.defaultMode = undefined;
+      this.lookupFailures = 0;
+      this.defaultModeAttempts = 0;
     }
     if (!this.installed) {
-      this.log(`could not determine the installed claude version (${this.launcher}); waiting for it to change`);
-      return undefined;
+      try {
+        this.installed = fake ?? (await installedVersion(this.launcher!));
+      } catch (error) {
+        this.log(`could not run ${this.launcher} --version: ${(error as Error).message}`);
+      }
+      if (!this.installed) {
+        this.lookupFailures++;
+        this.log(`could not determine the installed claude version (attempt ${this.lookupFailures} of ${MAX_LOOKUP_FAILURES})`);
+        return undefined;
+      }
+      this.lookupFailures = 0;
+      this.log(`installed claude version: ${this.installed}${fake ? " (fake_installed_version)" : ""}`);
     }
-    this.log(`installed claude version: ${this.installed}${fake ? " (fake_installed_version)" : ""}`);
-    try {
-      this.defaultMode = await defaultModeName(this.launcher!);
-    } catch {
-      this.defaultMode = undefined;
+    // Needed to resume in the default permission mode; retried on a few later checks if it fails.
+    if (!this.defaultMode && this.defaultModeAttempts < MAX_LOOKUP_FAILURES) {
+      this.defaultModeAttempts++;
+      try {
+        this.defaultMode = await defaultModeName(this.launcher!);
+      } catch {
+        this.defaultMode = undefined;
+      }
+      if (!this.defaultMode) this.log("could not read the default permission mode name from claude --help");
     }
     return this.installed;
   }
@@ -317,6 +350,7 @@ export class Clock {
     if (this.mode !== "idle") this.log(`idle: ${reason}`);
     this.mode = "idle";
     this.unproductiveChecks = 0;
+    this.agents = []; // panes change while idle; never judge with an old list
   }
 
   private herdrServerPresent(): boolean {
@@ -364,6 +398,7 @@ export class Clock {
       pluginRoot: this.ctx.pluginRoot,
       stateDir: this.ctx.paths.stateDir,
       readSessions: () => readSessions(this.ctx.paths.sessionsDir),
+      isAlive: this.ctx.isAlive ?? isAlive,
       log: (message: string) => this.log(message),
       sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
       now: () => Date.now(),
@@ -391,6 +426,10 @@ export class Clock {
       case "declined":
         store.setMark(session.sessionId, { version: installed, result: "declined", at });
         this.log(`${pane} ${short(session)}: countdown cancelled; leaving it on ${session.version}`);
+        break;
+      case "unsupported":
+        store.setMark(session.sessionId, { version: installed, result: "failed", reason: `not restarted: ${outcome.reason}`, at });
+        this.log(`${pane} ${short(session)}: not restarted: ${outcome.reason}`);
         break;
       case "failed":
         store.setMark(session.sessionId, { version: installed, result: "failed", reason: outcome.reason, at });

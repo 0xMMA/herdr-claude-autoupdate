@@ -51,3 +51,7 @@ test("a broken config.json does not stop the plugin", () => {
   assert.equal(warnings.length, 1);
   assert.equal(parseConfig([1, 2]).warnings.length, 1);
 });
+
+test("an empty fake_installed_version counts as unset", () => {
+  assert.equal(parseConfig({ fake_installed_version: "" }).config.fakeInstalledVersion, undefined);
+});

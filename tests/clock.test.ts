@@ -42,13 +42,14 @@ function setup(configJson: Record<string, unknown>) {
     env,
     isAlive: () => true,
     home: "/home/u",
+    findGitRoot: () => undefined,
   });
   const writeConfig = (json: Record<string, unknown>) =>
     writeFileSync(join(env.HERDR_PLUGIN_CONFIG_DIR, "config.json"), `${JSON.stringify(json)}\n`);
   return { clock, herdr, paths, store, launcher: join(bin, LAUNCHER), writeConfig };
 }
 
-const PROMPT_BOX = ["─".repeat(20), "❯ ", "─".repeat(20), "  ? for shortcuts"].join("\n");
+const PROMPT_BOX = ["─".repeat(20), "❯ ", "─".repeat(20), "  ⏵⏵ auto mode on (shift+tab to cycle)"].join("\n");
 
 test("R11: idle mode makes no herdr calls", async () => {
   const { clock, herdr, paths } = setup({ fake_installed_version: "2.1.290" });
@@ -78,7 +79,7 @@ test("R11/R12: a changed launcher switches to update mode, then back to idle", a
     { pane_id: "w1:p5", shell_pid: 1, foreground_processes: [{ pid: 77, name: "claude", argv: ["claude"] }] },
   ];
   herdr.screens = [
-    ["─".repeat(20), "❯ ", "─".repeat(20), "  ? for shortcuts"].join("\n"),
+    ["─".repeat(20), "❯ ", "─".repeat(20), "  ⏵⏵ auto mode on (shift+tab to cycle)"].join("\n"),
   ];
 
   await clock.check();
@@ -157,6 +158,40 @@ test("R16: sessions in folders Claude does not trust permanently are never resta
   const pane = clock.snapshot().panes[0]!;
   assert.match(pane.status, /folder not trusted/);
   assert.equal(herdr.count("agentGet") + herdr.count("sendKeys"), 0);
+  assert.equal(clock.snapshot().mode, "idle");
+});
+
+test("R1: a session missing from an old agent list waits instead of being given up", async () => {
+  const { clock, herdr, paths } = setup({ fake_installed_version: "2.1.290" });
+  writeSession(paths.sessionsDir, session({ pid: 1, sessionId: "a", version: "2.1.289", status: "busy" }));
+  herdr.agents = [agent({ agent_session: { value: "a" } })];
+  await clock.check(); // fetches the list once
+  // A new session appears in a pane after the list was fetched; nothing is idle yet.
+  writeSession(paths.sessionsDir, session({ pid: 2, sessionId: "b", version: "2.1.289", status: "busy" }));
+  await clock.check();
+  const b = clock.snapshot().panes.find((p) => p.sessionId === "b")!;
+  assert.match(b.status, /pane not known yet/);
+  assert.equal(clock.snapshot().mode, "update");
+});
+
+test("R16: an unreadable .claude.json means wait, not give up", async () => {
+  const { clock, herdr, paths } = setup({ fake_installed_version: "2.1.290", quiet_seconds: 0 });
+  writeFileSync(paths.claudeConfigFile, "{ half written");
+  writeSession(paths.sessionsDir, session({ version: "2.1.289" }));
+  herdr.agents = [agent()];
+  await clock.check();
+  assert.match(clock.snapshot().panes[0]!.status, /cannot read Claude's trusted folders/);
+  assert.equal(clock.snapshot().mode, "update");
+  assert.equal(herdr.count("sendKeys"), 0);
+});
+
+test("a failed version lookup is retried a few times, then waits for the next change", async () => {
+  const { clock, paths } = setup({});
+  writeSession(paths.sessionsDir, session({ version: "2.1.289" }));
+  await clock.check(); // the test launcher cannot answer --version
+  assert.equal(clock.snapshot().mode, "update");
+  await clock.check();
+  await clock.check();
   assert.equal(clock.snapshot().mode, "idle");
 });
 

@@ -103,6 +103,12 @@ Details:
   `--permission-mode`. Without an indicator, the CLI's name for the default mode
   (`manual`, read once per version from `claude --help`) is passed, so a `defaultMode` from
   settings cannot make the resumed session more permissive.
+- **Folder trust.** A restarted Claude asks "Do you trust this folder?" unless the folder
+  is trusted permanently; the dialog's default answer exits. Trust is read from Claude's
+  global config (`projects.<path>.hasTrustDialogAccepted`): the folder or a parent counts,
+  but the search stops at the git repository root, and the home directory never counts
+  (observed with Claude Code 2.1 on Windows). Untrusted sessions are never restarted; an
+  unreadable config means "wait", not "give up".
 - **Failures.** Once the first key has been sent, every error ends in a recorded
   `failed` outcome (log, optional notification); the session is not tried again for this
   version.
