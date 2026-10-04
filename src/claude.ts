@@ -8,9 +8,22 @@ const execFileAsync = promisify(execFile);
 
 type Env = Record<string, string | undefined>;
 
-/** Resolves `claude` the same way a shell would, so it is the binary `herdr agent start` launches. */
-export function findLauncher(env: Env = process.env, platform: NodeJS.Platform = process.platform): string | undefined {
-  const dirs = (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":").filter(Boolean);
+/**
+ * Resolves `claude` the same way a shell would, so it is the binary `herdr agent start`
+ * launches. herdr's server often runs without the PATH of a login shell (e.g. without
+ * `~/.local/bin` on Linux), so the native installer's and package managers' standard
+ * locations are tried after PATH.
+ */
+export function findLauncher(
+  env: Env = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home: string = env.HOME || env.USERPROFILE || "",
+): string | undefined {
+  const standard =
+    platform === "win32"
+      ? [join(home, ".local", "bin")]
+      : [join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+  const dirs = [...(env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":"), ...(home ? standard : [])].filter(Boolean);
   const exts = platform === "win32" ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
   for (const dir of dirs) {
     for (const ext of exts) {

@@ -144,7 +144,7 @@ async function status(paths: ReturnType<typeof resolvePaths>, waitForKey: boolea
     }
   } else {
     const { config, warnings } = loadConfig(paths.configDir);
-    const launcher = findLauncher();
+    const launcher = config.claudePath || findLauncher();
     let installed: string | undefined;
     try {
       installed = config.fakeInstalledVersion ?? (launcher ? await installedVersion(launcher) : undefined);

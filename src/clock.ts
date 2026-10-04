@@ -186,10 +186,20 @@ export class Clock {
   async check(): Promise<void> {
     if (!this.herdrServerPresent()) return;
 
+    // A config edit (e.g. turning dry_run off) gets a full check without waiting for an update.
+    const configStamp = fileStamp(join(this.ctx.paths.configDir, CONFIG_FILE));
+    if (configStamp !== this.configStamp || this.forced) {
+      this.configStamp = configStamp;
+      this.forced = true;
+      ({ config: this.config, warnings: this.configWarnings } = loadConfig(this.ctx.paths.configDir));
+      for (const warning of this.configWarnings) this.log(`config: ${warning}`);
+      this.launcher = undefined; // claude_path may have changed
+    }
+
     if (!this.launcher) {
-      this.launcher = findLauncher(this.ctx.env);
+      this.launcher = this.config.claudePath || findLauncher(this.ctx.env);
       if (!this.launcher) {
-        if (this.mode !== "idle") this.log("claude not found on PATH; waiting");
+        if (this.mode !== "idle") this.log("claude not found on PATH or in the standard locations; set claude_path in config.json");
         this.mode = "idle";
         return;
       }
@@ -199,21 +209,13 @@ export class Clock {
       this.launcher = undefined; // moved or reinstalled; search PATH again next time
       return;
     }
-    // A config edit (e.g. turning dry_run off) gets a full check without waiting for an update.
-    const configStamp = fileStamp(join(this.ctx.paths.configDir, CONFIG_FILE));
-    if (configStamp !== this.configStamp) {
-      this.configStamp = configStamp;
-      this.forced = true;
-    }
     if (this.mode === "idle" && fingerprint === this.fingerprint && !this.forced) return;
 
     // Update mode from here on.
-    const wasForced = this.forced;
     this.forced = false;
     this.mode = "update";
     this.lastCheckAt = Date.now();
     this.fingerprint = fingerprint; // stored first: a failed lookup must not repeat every interval
-    if (wasForced) ({ config: this.config, warnings: this.configWarnings } = loadConfig(this.ctx.paths.configDir));
 
     const installed = await this.resolveInstalled(fingerprint);
     if (!installed) {

@@ -143,3 +143,11 @@ test("drops session files of dead processes and duplicate session ids", () => {
   assert.equal(isAlive(process.pid), true);
   assert.equal(isAlive(2 ** 30), false);
 });
+
+test("R14: finds the native installer's launcher even when herdr's PATH lacks it", () => {
+  const home = tempDir();
+  mkdirSync(join(home, ".local", "bin"), { recursive: true });
+  writeFileSync(join(home, ".local", "bin", LAUNCHER), "");
+  const found = findLauncher({ PATH: tempDir(), PATHEXT: ".EXE" }, process.platform, home);
+  assert.equal(found, join(home, ".local", "bin", LAUNCHER));
+});

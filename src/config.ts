@@ -18,6 +18,8 @@ export interface Config {
   toast: boolean;
   /** Pretend this Claude Code version is installed. For testing only. */
   fakeInstalledVersion: string | undefined;
+  /** Path of the `claude` launcher, when it is neither on herdr's PATH nor in a standard location. */
+  claudePath: string | undefined;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -29,6 +31,7 @@ export const DEFAULT_CONFIG: Config = {
   rescueDrafts: true,
   toast: false,
   fakeInstalledVersion: undefined,
+  claudePath: undefined,
 };
 
 export const CONFIG_FILE = "config.json";
@@ -72,6 +75,9 @@ export function parseConfig(raw: unknown): LoadedConfig {
       const key = BOOLEAN_KEYS[name as keyof typeof BOOLEAN_KEYS];
       if (typeof value === "boolean") config[key] = value;
       else warnings.push(`${name} must be true or false; using ${config[key]}`);
+    } else if (name === "claude_path") {
+      if (typeof value === "string" || value === null) config.claudePath = value || undefined;
+      else warnings.push("claude_path must be a string");
     } else if (name === "fake_installed_version") {
       if (typeof value === "string" || value === null) config.fakeInstalledVersion = value || undefined;
       else warnings.push("fake_installed_version must be a string");

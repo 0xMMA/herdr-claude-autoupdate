@@ -202,3 +202,12 @@ test("a disabled plugin stops the clock", async () => {
   await clock.check();
   assert.ok(store.tailLog(5).some((l) => l.includes("plugin is disabled")));
 });
+
+test("claude_path in config.json is used, and a config edit takes effect even before claude was found", async () => {
+  const { clock, launcher, writeConfig } = setup({ fake_installed_version: "2.1.290", claude_path: "/nowhere/claude" });
+  await clock.check();
+  assert.equal(clock.snapshot().launcher, undefined, "claude_path does not exist");
+  writeConfig({ fake_installed_version: "2.1.290", claude_path: launcher });
+  await clock.check();
+  assert.equal(clock.snapshot().launcher, launcher);
+});

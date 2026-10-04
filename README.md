@@ -19,7 +19,8 @@ This plugin does the restart for you, one pane at a time, when the pane is reall
 - **Unsent drafts survive:** a half-typed prompt is moved through Claude's input history and put back.
 - **Focused pane:** a 5-second countdown popup; any key cancels.
 - **Other panes are never touched:** scripts, servers and shells keep running.
-- **Costs nothing while idle:** one `stat()` per minute until an update arrives.
+- **Costs nothing while idle:** one `stat()` per minute until an update arrives. The
+  sleeping Node.js process uses practically no CPU and about 60–90 MB of memory.
 - **Linux, macOS and Windows**, no runtime dependencies.
 
 The full specification is in [docs/requirements.md](docs/requirements.md), the design in
@@ -100,6 +101,7 @@ All settings are optional.
 | `focused_unattended_minutes` | `30` | If the popup cannot be shown, restart the focused pane only after this much idle time. |
 | `rescue_drafts` | `true` | Keep unsent drafts across the restart. `false`: panes with a draft wait instead. |
 | `toast` | `false` | Show a herdr notification after each restart or failure. |
+| `claude_path` | – | Path of the `claude` launcher, if it is neither on the herdr server's `PATH` nor in a standard location (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`). |
 | `fake_installed_version` | – | Testing only: pretend this Claude Code version is installed. |
 
 ## Actions

@@ -55,3 +55,7 @@ test("a broken config.json does not stop the plugin", () => {
 test("an empty fake_installed_version counts as unset", () => {
   assert.equal(parseConfig({ fake_installed_version: "" }).config.fakeInstalledVersion, undefined);
 });
+
+test("R14: claude_path can point at a launcher outside PATH", () => {
+  assert.equal(parseConfig({ claude_path: "/opt/claude/bin/claude" }).config.claudePath, "/opt/claude/bin/claude");
+});
