@@ -46,6 +46,11 @@ cheap file checks (idle and quiet long enough). After ten checks without a resta
 interval grows fivefold until something happens. Session files of processes that no
 longer exist are ignored, and duplicate files for one session id are collapsed.
 
+**Finding `claude`.** herdr's server usually does not run with a login shell's `PATH`
+(on Linux `~/.local/bin` is often missing), while the panes do. The clock therefore
+searches `PATH`, then the standard install locations (`~/.local/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin`, `/usr/bin`), unless `claude_path` is set.
+
 **Single instance and control.** The clock listens on a local socket (a named pipe on
 Windows), keyed by the herdr server's socket path. The operating system releases it when
 the process dies, so it works as a lock without heartbeats, and the `tick`, `status` and

@@ -153,6 +153,7 @@ Start with the status action; it shows each outdated pane with the reason it is 
 | `not in a herdr pane on this server` | The session runs outside herdr, on another machine, or herdr's Claude integration is missing. It is never touched. |
 | `failed: …` | See the log. The pane is not retried until the next Claude Code version. |
 | `clock: NOT running` | Run the `ensure-clock` action. |
+| `claude: not found`, or a different `claude` than your shell uses | herdr's server has its own `PATH`. Set `claude_path` in `config.json` to the launcher your panes run (`which claude` / `where claude`). |
 
 ## FAQ
 

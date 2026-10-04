@@ -7,6 +7,7 @@ import {
   findGitRoot,
   findLauncher,
   isAlive,
+  standardLauncherDirs,
   isTrustedFolder,
   launcherFingerprint,
   liveSessions,
@@ -26,7 +27,7 @@ test("R8: finds claude on PATH like a shell would", () => {
   const sep = process.platform === "win32" ? ";" : ":";
   const found = findLauncher({ PATH: [empty, bin].join(sep), PATHEXT: ".COM;.EXE" });
   assert.equal(found, join(bin, LAUNCHER));
-  assert.equal(findLauncher({ PATH: empty }), undefined);
+  assert.equal(findLauncher({ PATH: empty }, process.platform, []), undefined);
 });
 
 test("R11: the launcher fingerprint changes when the binary is replaced", () => {
@@ -148,6 +149,11 @@ test("R14: finds the native installer's launcher even when herdr's PATH lacks it
   const home = tempDir();
   mkdirSync(join(home, ".local", "bin"), { recursive: true });
   writeFileSync(join(home, ".local", "bin", LAUNCHER), "");
-  const found = findLauncher({ PATH: tempDir(), PATHEXT: ".EXE" }, process.platform, home);
+  const found = findLauncher({ PATH: tempDir(), PATHEXT: ".EXE" }, process.platform, standardLauncherDirs(process.platform, home));
   assert.equal(found, join(home, ".local", "bin", LAUNCHER));
+});
+
+test("R14: system install locations are searched even without a home directory", () => {
+  assert.deepEqual(standardLauncherDirs("linux", ""), ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]);
+  assert.equal(standardLauncherDirs("win32", "C:\\Users\\u").length, 1);
 });

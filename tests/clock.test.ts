@@ -43,6 +43,7 @@ function setup(configJson: Record<string, unknown>) {
     isAlive: () => true,
     home: "/home/u",
     findGitRoot: () => undefined,
+    standardDirs: [],
   });
   const writeConfig = (json: Record<string, unknown>) =>
     writeFileSync(join(env.HERDR_PLUGIN_CONFIG_DIR, "config.json"), `${JSON.stringify(json)}\n`);
@@ -210,4 +211,21 @@ test("claude_path in config.json is used, and a config edit takes effect even be
   writeConfig({ fake_installed_version: "2.1.290", claude_path: launcher });
   await clock.check();
   assert.equal(clock.snapshot().launcher, launcher);
+});
+
+test("R11: without claude, a config edit is read once, not on every interval", async () => {
+  const { clock, store, writeConfig } = setup({});
+  await clock.check();
+  writeConfig({ claude_path: "/nowhere/claude", unknown_key: 1 });
+  for (let i = 0; i < 4; i++) await clock.check();
+  const log = store.tailLog(50);
+  assert.equal(log.filter((l) => l.includes("unknown setting unknown_key")).length, 1, "config parsed once");
+  assert.equal(log.filter((l) => l.includes("claude_path /nowhere/claude does not exist")).length, 1, "reported once");
+  assert.equal(clock.snapshot().mode, "idle");
+});
+
+test("claude_path may start with ~", async () => {
+  const { clock } = setup({ fake_installed_version: "2.1.290", claude_path: "~/missing/claude" });
+  await clock.check();
+  assert.equal(clock.snapshot().launcher, undefined);
 });

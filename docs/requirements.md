@@ -161,7 +161,10 @@ an older Node prints a clear message.
 **Requirement:** A repository of its own, not tied to any personal setup, installable with
 `herdr plugin install <owner>/<repo>`, with no hard-coded paths.
 **Rationale:** It has to work on other machines (e.g. a work laptop) without copying files around.
-**Acceptance:** Paths come from herdr's plugin environment, `PATH` and `CLAUDE_CONFIG_DIR`; `herdr plugin install` works on a clean machine.
+**Acceptance:** Paths come from herdr's plugin environment, `PATH`, the standard install
+locations of Claude Code (herdr's server often lacks the login shell's `PATH`),
+`CLAUDE_CONFIG_DIR` and the optional `claude_path` setting; `herdr plugin install` works on
+a clean machine.
 **Source:** Stated. **Verified by:** `claude.test.ts`, manual check 3.
 
 ## R15 Open-source quality

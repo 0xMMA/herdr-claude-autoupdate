@@ -13,6 +13,7 @@ import {
   liveSessions,
   readSessions,
   readTrustedFolders,
+  standardLauncherDirs,
   type ClaudeSession,
 } from "./claude.ts";
 import { CONFIG_FILE, loadConfig, type Config } from "./config.ts";
@@ -46,6 +47,8 @@ export interface ClockContext {
   home?: string;
   /** Git root lookup; injectable for tests. */
   findGitRoot?: (dir: string) => string | undefined;
+  /** Standard install locations searched after PATH; injectable for tests. */
+  standardDirs?: readonly string[];
 }
 
 export type Mode = "idle" | "update";
@@ -95,6 +98,8 @@ export class Clock {
   private defaultModeAttempts = 0;
   private socketMisses = 0;
   private forced = false;
+  private reloadRequested = false;
+  private launcherMissingLogged = false;
   private stopping = false;
   private readonly startedAt = Date.now();
   private wake: (() => void) | undefined;
@@ -148,7 +153,7 @@ export class Clock {
       case "ping":
         return "pong";
       case "tick":
-        this.forced = true;
+        this.reloadRequested = true;
         this.unproductiveChecks = 0;
         this.skipped.clear();
         this.wake?.();
@@ -186,29 +191,35 @@ export class Clock {
   async check(): Promise<void> {
     if (!this.herdrServerPresent()) return;
 
-    // A config edit (e.g. turning dry_run off) gets a full check without waiting for an update.
+    // A config edit (e.g. turning dry_run off) or a tick gets one reload and a full check
+    // without waiting for an update. The reload itself happens once, not every interval.
     const configStamp = fileStamp(join(this.ctx.paths.configDir, CONFIG_FILE));
-    if (configStamp !== this.configStamp || this.forced) {
+    if (configStamp !== this.configStamp || this.reloadRequested) {
       this.configStamp = configStamp;
+      this.reloadRequested = false;
       this.forced = true;
       ({ config: this.config, warnings: this.configWarnings } = loadConfig(this.ctx.paths.configDir));
       for (const warning of this.configWarnings) this.log(`config: ${warning}`);
       this.launcher = undefined; // claude_path may have changed
+      this.launcherMissingLogged = false;
     }
 
-    if (!this.launcher) {
-      this.launcher = this.config.claudePath || findLauncher(this.ctx.env);
-      if (!this.launcher) {
-        if (this.mode !== "idle") this.log("claude not found on PATH or in the standard locations; set claude_path in config.json");
-        this.mode = "idle";
-        return;
+    if (!this.launcher) this.launcher = this.resolveLauncher();
+    const fingerprint = this.launcher ? launcherFingerprint(this.launcher) : undefined;
+    if (!this.launcher || !fingerprint) {
+      if (!this.launcherMissingLogged) {
+        this.launcherMissingLogged = true;
+        this.log(
+          this.config.claudePath
+            ? `claude_path ${this.config.claudePath} does not exist`
+            : "claude not found on PATH or in the standard locations; set claude_path in config.json",
+        );
       }
-    }
-    const fingerprint = launcherFingerprint(this.launcher);
-    if (!fingerprint) {
-      this.launcher = undefined; // moved or reinstalled; search PATH again next time
+      this.launcher = undefined; // look again next interval (a few stat() calls)
+      this.enterIdle("claude not found");
       return;
     }
+    this.launcherMissingLogged = false;
     if (this.mode === "idle" && fingerprint === this.fingerprint && !this.forced) return;
 
     // Update mode from here on.
@@ -346,6 +357,15 @@ export class Clock {
       if (!this.defaultMode) this.log("could not read the default permission mode name from claude --help");
     }
     return this.installed;
+  }
+
+  private resolveLauncher(): string | undefined {
+    const configured = this.config.claudePath;
+    if (configured) {
+      // `~` is not expanded by anyone else here.
+      return configured.replace(/^~(?=$|[\\/])/, this.ctx.home ?? homedir());
+    }
+    return findLauncher(this.ctx.env, process.platform, this.ctx.standardDirs ?? standardLauncherDirs(process.platform, this.ctx.home ?? homedir()));
   }
 
   private enterIdle(reason: string): void {

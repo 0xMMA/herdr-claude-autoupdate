@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { formatVersion, parseVersion } from "./version.ts";
@@ -8,22 +9,23 @@ const execFileAsync = promisify(execFile);
 
 type Env = Record<string, string | undefined>;
 
+/** Where the native installer and package managers put `claude`, in search order. */
+export function standardLauncherDirs(platform: NodeJS.Platform = process.platform, home: string = homedir()): string[] {
+  const local = home ? [join(home, ".local", "bin")] : [];
+  return platform === "win32" ? local : [...local, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+}
+
 /**
  * Resolves `claude` the same way a shell would, so it is the binary `herdr agent start`
  * launches. herdr's server often runs without the PATH of a login shell (e.g. without
- * `~/.local/bin` on Linux), so the native installer's and package managers' standard
- * locations are tried after PATH.
+ * `~/.local/bin` on Linux), so the standard install locations are tried after PATH.
  */
 export function findLauncher(
   env: Env = process.env,
   platform: NodeJS.Platform = process.platform,
-  home: string = env.HOME || env.USERPROFILE || "",
+  standardDirs: readonly string[] = standardLauncherDirs(platform),
 ): string | undefined {
-  const standard =
-    platform === "win32"
-      ? [join(home, ".local", "bin")]
-      : [join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
-  const dirs = [...(env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":"), ...(home ? standard : [])].filter(Boolean);
+  const dirs = [...(env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":"), ...standardDirs].filter(Boolean);
   const exts = platform === "win32" ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
   for (const dir of dirs) {
     for (const ext of exts) {

@@ -134,7 +134,7 @@ async function status(paths: ReturnType<typeof resolvePaths>, waitForKey: boolea
   if (snapshot) {
     lines.push(`clock:      running (pid ${snapshot.pid}), ${snapshot.mode} mode`);
     lines.push(`last check: ${snapshot.lastCheckAt ? new Date(snapshot.lastCheckAt).toLocaleString() : "not yet"}`);
-    lines.push(`claude:     ${snapshot.launcher ?? "not found on PATH"} (${snapshot.installed ?? "version unknown"})`);
+    lines.push(`claude:     ${snapshot.launcher ?? "not found (set claude_path in config.json)"} (${snapshot.installed ?? "version unknown"})`);
     lines.push(`dry run:    ${snapshot.config.dryRun ? "yes (set \"dry_run\": false in config.json to act)" : "no"}`);
     for (const warning of snapshot.configWarnings) lines.push(`config:     ${warning}`);
     lines.push("");
@@ -153,7 +153,7 @@ async function status(paths: ReturnType<typeof resolvePaths>, waitForKey: boolea
     }
     const outdated = installed ? readSessions(paths.sessionsDir).filter((s) => isOlder(s.version, installed)) : [];
     lines.push("clock:      NOT running (start it with the ensure-clock action)");
-    lines.push(`claude:     ${launcher ?? "not found on PATH"} (${installed ?? "version unknown"})`);
+    lines.push(`claude:     ${launcher ?? "not found (set claude_path in config.json)"} (${installed ?? "version unknown"})`);
     lines.push(`dry run:    ${config.dryRun ? "yes" : "no"}`);
     for (const warning of warnings) lines.push(`config:     ${warning}`);
     lines.push(`outdated Claude sessions on this machine: ${outdated.length}`);
