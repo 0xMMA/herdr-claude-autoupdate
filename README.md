@@ -46,8 +46,9 @@ The plugin never installs updates itself; Claude Code's own updater keeps doing 
   (`herdr integration install claude`; check with `herdr integration status`). It tells
   herdr which session runs in which pane; without it no pane can be matched.
 - Node.js 22.18 or newer on the `PATH` of the herdr server (`node --version`)
-- Claude Code installed with the native installer, npm, Homebrew or WinGet, so that
-  `claude` is on the `PATH`
+- Claude Code installed with the native installer, npm, Homebrew or WinGet. The plugin
+  looks for `claude` on the herdr server's `PATH` and in the standard install locations;
+  see `claude_path` below if yours is elsewhere.
 
 ## Installation
 
@@ -101,7 +102,7 @@ All settings are optional.
 | `focused_unattended_minutes` | `30` | If the popup cannot be shown, restart the focused pane only after this much idle time. |
 | `rescue_drafts` | `true` | Keep unsent drafts across the restart. `false`: panes with a draft wait instead. |
 | `toast` | `false` | Show a herdr notification after each restart or failure. |
-| `claude_path` | – | Path of the `claude` launcher, if it is neither on the herdr server's `PATH` nor in a standard location (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`). |
+| `claude_path` | – | Use this `claude` launcher instead of searching the herdr server's `PATH` and the standard locations (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`). It must be the same `claude` your panes start, and the launcher itself (e.g. `~/.local/bin/claude`), not a versioned binary under `~/.local/share/claude/versions/`, or updates are never noticed. |
 | `fake_installed_version` | – | Testing only: pretend this Claude Code version is installed. |
 
 ## Actions

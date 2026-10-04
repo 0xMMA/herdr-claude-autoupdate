@@ -16,9 +16,10 @@ export function standardLauncherDirs(platform: NodeJS.Platform = process.platfor
 }
 
 /**
- * Resolves `claude` the same way a shell would, so it is the binary `herdr agent start`
- * launches. herdr's server often runs without the PATH of a login shell (e.g. without
- * `~/.local/bin` on Linux), so the standard install locations are tried after PATH.
+ * Finds the `claude` launcher the panes most likely run: PATH first, like a shell, then
+ * the standard install locations, because herdr's server often runs without the PATH of
+ * a login shell (e.g. without `~/.local/bin` on Linux). If this differs from what the
+ * panes' shells start, `claude_path` overrides it.
  */
 export function findLauncher(
   env: Env = process.env,

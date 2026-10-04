@@ -16,6 +16,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   original launch flags and the live permission mode.
 - Unsent prompt drafts are moved through Claude Code's input history and restored.
 - Countdown popup before restarting the focused pane; any key cancels.
+- `claude_path` setting, and a search of the standard install locations when herdr's
+  server `PATH` lacks `claude`.
 - Dry-run mode (default), status popup, `tick`, `ensure-clock`, `restart-clock` and `stop-clock` actions.
 - Safety checks: sessions in folders Claude does not trust permanently (e.g. the home
   directory), sessions started in another directory (`--worktree`) and panes showing a

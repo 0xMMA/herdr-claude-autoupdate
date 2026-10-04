@@ -200,6 +200,9 @@ export class Clock {
       this.forced = true;
       ({ config: this.config, warnings: this.configWarnings } = loadConfig(this.ctx.paths.configDir));
       for (const warning of this.configWarnings) this.log(`config: ${warning}`);
+      if (this.config.claudePath && /[\\/]versions[\\/][^\\/]+$/.test(this.config.claudePath)) {
+        this.log("config: claude_path points at a versioned binary; use the launcher (e.g. ~/.local/bin/claude) or updates are never noticed");
+      }
       this.launcher = undefined; // claude_path may have changed
       this.launcherMissingLogged = false;
     }
