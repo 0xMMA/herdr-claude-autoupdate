@@ -56,37 +56,45 @@ Install it on **every machine that runs a herdr server** with Claude panes. Plug
 the server they are installed on, and each server only handles its own panes, also when
 you attach to it as a remote machine.
 
+Try it first in **dry-run mode**, where it only logs what it would do:
+
 ```sh
-herdr plugin install 0xMMA/herdr-claude-autoupdate
+herdr plugin install 0xMMA/herdr-claude-autoupdate --yes
 herdr plugin action invoke claude-autoupdate.ensure-clock
+herdr plugin action invoke claude-autoupdate.status   # what it would restart, and why
 ```
 
-The second command starts the background process now; afterwards herdr starts it on
-every server start.
-
-For remote machines you can do both steps from your workstation over SSH (use a login
-shell so `herdr` is on the `PATH`):
+Then go live:
 
 ```sh
-ssh <host> 'bash -lc "herdr plugin install 0xMMA/herdr-claude-autoupdate --yes && herdr plugin action invoke claude-autoupdate.ensure-clock"'
+herdr plugin action invoke claude-autoupdate.live
 ```
 
-### First run: dry run
-
-The plugin starts in **dry-run mode**: it logs what it would do but does not touch any
-pane. Check the status, then switch dry run off:
+Or do both in one go:
 
 ```sh
-herdr plugin action invoke claude-autoupdate.status
+herdr plugin install 0xMMA/herdr-claude-autoupdate --yes && herdr plugin action invoke claude-autoupdate.live
 ```
 
-Edit `config.json` in the directory printed by `herdr plugin config-dir claude-autoupdate`:
+`ensure-clock` and `live` start the background process right away; after that herdr
+starts it on every server start. `live` sets `"dry_run": false` in `config.json` and keeps
+your other settings; `dry-run` switches back.
 
-```json
-{ "dry_run": false }
+For remote machines you can run it from your workstation over SSH (use a login shell so
+`herdr` is on the `PATH`):
+
+```sh
+ssh <host> 'bash -lc "herdr plugin install 0xMMA/herdr-claude-autoupdate --yes && herdr plugin action invoke claude-autoupdate.live"'
 ```
 
-The plugin notices the change within a minute.
+### Updating the plugin
+
+```sh
+herdr plugin install 0xMMA/herdr-claude-autoupdate --yes && herdr plugin action invoke claude-autoupdate.restart-clock
+```
+
+Your `config.json` lives outside the plugin's code and is kept. The restart makes the
+running background process load the new code.
 
 ## Configuration
 
@@ -109,6 +117,8 @@ All settings are optional.
 
 | Action | What it does |
 |---|---|
+| `claude-autoupdate.live` | Turn dry run off and make sure the background process runs. |
+| `claude-autoupdate.dry-run` | Turn dry run back on: only log what would be restarted. |
 | `claude-autoupdate.status` | Popup with the installed version, every outdated pane and why it is or is not restarted yet, and the recent log. |
 | `claude-autoupdate.tick` | Run a full check now (also re-reads `config.json`). |
 | `claude-autoupdate.ensure-clock` | Start the background process unless it is running. |

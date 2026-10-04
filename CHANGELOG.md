@@ -6,6 +6,15 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-04
+
+### Added
+
+- `live` and `dry-run` actions: switch dry run off or on without editing `config.json`
+  (other settings are kept), start the background process if needed and apply at once.
+  Installing and going live is now one line:
+  `herdr plugin install 0xMMA/herdr-claude-autoupdate --yes && herdr plugin action invoke claude-autoupdate.live`.
+
 ## [0.1.0] - 2026-10-04
 
 ### Added
@@ -24,5 +33,6 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dialog are never restarted; a pane that has to wait does not hold up the others.
 - Requirements specification (`docs/requirements.md`) and design notes (`docs/design.md`).
 
-[Unreleased]: https://github.com/0xMMA/herdr-claude-autoupdate/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/0xMMA/herdr-claude-autoupdate/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/0xMMA/herdr-claude-autoupdate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/0xMMA/herdr-claude-autoupdate/releases/tag/v0.1.0

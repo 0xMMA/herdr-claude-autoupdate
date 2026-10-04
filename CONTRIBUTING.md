@@ -34,7 +34,7 @@ herdr plugin action invoke claude-autoupdate.ensure-clock
 ```
 
 After changing code, run the `restart-clock` action so the background process picks it up.
-Keep `"dry_run": true` in `config.json` until you are sure. The log is `plugin.log` in
+Keep dry run on (`dry-run` action, the default) until you are sure. The log is `plugin.log` in
 herdr's plugin state directory.
 
 ## Tests

@@ -1,6 +1,6 @@
 id = "claude-autoupdate"
 name = "Claude Code auto-update"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.3"
 description = "Restarts idle Claude Code panes onto the newly installed Claude Code version, in place, with the same session and flags."
 platforms = ["linux", "macos", "windows"]
@@ -10,6 +10,20 @@ platforms = ["linux", "macos", "windows"]
 # ensure-clock action once (startup hooks only run when the server starts).
 [[startup]]
 command = ["node", "bin/claude-autoupdate.mjs", "ensure-clock"]
+
+[[actions]]
+id = "live"
+title = "Claude auto-update: go live"
+description = "Turn dry run off (restart outdated idle panes) and make sure the clock is running"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "live"]
+
+[[actions]]
+id = "dry-run"
+title = "Claude auto-update: dry run"
+description = "Turn dry run back on: only log what would be restarted"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "dry-run"]
 
 [[actions]]
 id = "status"

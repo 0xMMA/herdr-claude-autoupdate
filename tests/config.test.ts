@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DEFAULT_CONFIG, loadConfig, parseConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, parseConfig, writeDryRun } from "../src/config.ts";
 import { tempDir } from "./helpers.ts";
 
 test("R16: dry run is on by default", () => {
@@ -58,4 +58,30 @@ test("an empty fake_installed_version counts as unset", () => {
 
 test("R14: claude_path can point at a launcher outside PATH", () => {
   assert.equal(parseConfig({ claude_path: "/opt/claude/bin/claude" }).config.claudePath, "/opt/claude/bin/claude");
+});
+
+test("live/dry-run: switching dry run keeps the other settings", () => {
+  const dir = tempDir();
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ quiet_seconds: 30, toast: true }));
+  assert.deepEqual(writeDryRun(dir, false), { ok: true });
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")), { quiet_seconds: 30, toast: true, dry_run: false });
+  assert.equal(loadConfig(dir).config.dryRun, false);
+  writeDryRun(dir, true);
+  assert.equal(loadConfig(dir).config.dryRun, true);
+});
+
+test("live/dry-run: creates config.json (and its folder) when there is none", () => {
+  const dir = join(tempDir(), "not-yet");
+  assert.deepEqual(writeDryRun(dir, false), { ok: true });
+  assert.equal(loadConfig(dir).config.dryRun, false);
+});
+
+test("live/dry-run: never overwrites a config.json it cannot parse", () => {
+  const dir = tempDir();
+  writeFileSync(join(dir, "config.json"), "{ my half-edited config");
+  const result = writeDryRun(dir, false);
+  assert.equal(result.ok, false);
+  assert.equal(readFileSync(join(dir, "config.json"), "utf8"), "{ my half-edited config");
+  writeFileSync(join(dir, "config.json"), "[1, 2]");
+  assert.equal(writeDryRun(dir, false).ok, false);
 });

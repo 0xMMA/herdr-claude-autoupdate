@@ -1,6 +1,6 @@
 {
   "name": "herdr-claude-autoupdate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "herdr plugin that restarts idle Claude Code panes onto the newly installed Claude Code version, in place, with the same session and flags.",
   "private": true,
   "type": "module",

@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeAtomic } from "./store.ts";
 
 export interface Config {
   /** Log what would happen without touching any pane. */
@@ -100,4 +101,37 @@ export function loadConfig(configDir: string): LoadedConfig {
   } catch (error) {
     return { config: { ...DEFAULT_CONFIG }, warnings: [`config.json is not valid JSON (${(error as Error).message}); using defaults`] };
   }
+}
+
+/**
+ * Switches dry run on or off in the user's config.json, keeping every other setting.
+ * Refuses to touch a file it cannot parse, so a hand-edited config is never lost.
+ */
+export function writeDryRun(configDir: string, dryRun: boolean): { ok: true } | { ok: false; error: string } {
+  const path = join(configDir, CONFIG_FILE);
+  let current: Record<string, unknown> = {};
+  let text: string | undefined;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      return { ok: false, error: `cannot read ${path}: ${(error as Error).message}` };
+    }
+  }
+  if (text !== undefined && text.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, error: `${path} is not valid JSON; fix or delete it first` };
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { ok: false, error: `${path} does not contain a JSON object; fix or delete it first` };
+    }
+    current = parsed as Record<string, unknown>;
+  }
+  mkdirSync(configDir, { recursive: true });
+  writeAtomic(path, `${JSON.stringify({ ...current, dry_run: dryRun }, null, 2)}
+`);
+  return { ok: true };
 }
