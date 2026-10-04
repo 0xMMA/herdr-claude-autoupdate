@@ -1,0 +1,63 @@
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { findLauncher, launcherFingerprint, parseSession, readSessions, versionFromInstallPath } from "../src/claude.ts";
+import { session, tempDir, writeSession } from "./helpers.ts";
+
+const LAUNCHER = process.platform === "win32" ? "claude.exe" : "claude";
+
+test("R8: finds claude on PATH like a shell would", () => {
+  const empty = tempDir();
+  const bin = tempDir();
+  writeFileSync(join(bin, LAUNCHER), "");
+  const sep = process.platform === "win32" ? ";" : ":";
+  const found = findLauncher({ PATH: [empty, bin].join(sep), PATHEXT: ".COM;.EXE" });
+  assert.equal(found, join(bin, LAUNCHER));
+  assert.equal(findLauncher({ PATH: empty }), undefined);
+});
+
+test("R11: the launcher fingerprint changes when the binary is replaced", () => {
+  const dir = tempDir();
+  const file = join(dir, LAUNCHER);
+  writeFileSync(file, "v1");
+  const before = launcherFingerprint(file);
+  writeFileSync(file, "version 2");
+  assert.notEqual(launcherFingerprint(file), before);
+  assert.equal(launcherFingerprint(join(dir, "missing")), undefined);
+});
+
+test("R11: on Linux and macOS the version comes from the install path, without starting claude", () => {
+  assert.equal(versionFromInstallPath("/home/u/.local/share/claude/versions/2.1.290"), "2.1.290");
+  assert.equal(versionFromInstallPath("C:\\Users\\u\\.local\\bin\\claude.exe"), undefined);
+});
+
+test("reads Claude's session files and skips anything unexpected", () => {
+  const dir = tempDir();
+  writeSession(dir, session({ pid: 11, sessionId: "a" }));
+  writeSession(dir, session({ pid: 12, sessionId: "b", status: "busy" }));
+  writeFileSync(join(dir, "13.json"), "{ half written");
+  writeFileSync(join(dir, "14.json"), JSON.stringify({ pid: 14 }));
+  writeFileSync(join(dir, "11.abcdef.key"), "secret");
+  mkdirSync(join(dir, "15.json.d"));
+  const ids = readSessions(dir)
+    .map((s) => s.sessionId)
+    .sort();
+  assert.deepEqual(ids, ["a", "b"]);
+  assert.deepEqual(readSessions(join(dir, "nope")), []);
+});
+
+test("parses the fields the plugin relies on", () => {
+  const parsed = parseSession({
+    pid: 1,
+    sessionId: "s",
+    cwd: "/x",
+    version: "2.1.289",
+    status: "idle",
+    statusUpdatedAt: 5,
+    kind: "interactive",
+    extra: true,
+  });
+  assert.deepEqual(parsed, { pid: 1, sessionId: "s", cwd: "/x", version: "2.1.289", status: "idle", statusUpdatedAt: 5, kind: "interactive" });
+  assert.equal(parseSession(null), undefined);
+});

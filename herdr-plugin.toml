@@ -1,0 +1,64 @@
+id = "claude-autoupdate"
+name = "Claude Code auto-update"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Restarts idle Claude Code panes onto the newly installed Claude Code version, in place, with the same session and flags."
+platforms = ["linux", "macos", "windows"]
+
+# Starts the background clock once per herdr server start. It returns immediately;
+# the clock itself is detached. After `plugin install` or `plugin link`, run the
+# ensure-clock action once (startup hooks only run when the server starts).
+[[startup]]
+command = ["node", "bin/claude-autoupdate.mjs", "ensure-clock"]
+
+[[actions]]
+id = "status"
+title = "Claude auto-update: status"
+description = "Show which Claude panes are outdated and why each one is or is not restarted"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "show-status"]
+
+[[actions]]
+id = "tick"
+title = "Claude auto-update: check now"
+description = "Run a full check immediately and reload config.json"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "tick"]
+
+[[actions]]
+id = "ensure-clock"
+title = "Claude auto-update: start clock"
+description = "Start the background clock unless it is already running"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "ensure-clock"]
+
+[[actions]]
+id = "restart-clock"
+title = "Claude auto-update: restart clock"
+description = "Restart the background clock, e.g. after updating this plugin"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "restart-clock"]
+
+[[actions]]
+id = "stop-clock"
+title = "Claude auto-update: stop clock"
+description = "Stop the background clock until the next server start"
+contexts = ["workspace"]
+command = ["node", "bin/claude-autoupdate.mjs", "stop-clock"]
+
+[[panes]]
+id = "status"
+title = "Claude auto-update status"
+placement = "popup"
+width = "90%"
+height = "70%"
+command = ["node", "bin/claude-autoupdate.mjs", "status", "--wait"]
+
+# Opened by the clock over the focused pane before restarting it.
+[[panes]]
+id = "countdown"
+title = "Claude Code update"
+placement = "popup"
+width = 60
+height = 10
+command = ["node", "bin/claude-autoupdate.mjs", "countdown"]

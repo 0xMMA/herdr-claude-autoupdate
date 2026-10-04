@@ -1,0 +1,36 @@
+{
+  "name": "herdr-claude-autoupdate",
+  "version": "0.1.0",
+  "description": "herdr plugin that restarts idle Claude Code panes onto the newly installed Claude Code version, in place, with the same session and flags.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Michael Martin",
+  "homepage": "https://github.com/0xMMA/herdr-claude-autoupdate#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xMMA/herdr-claude-autoupdate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/0xMMA/herdr-claude-autoupdate/issues"
+  },
+  "keywords": [
+    "herdr",
+    "herdr-plugin",
+    "claude-code",
+    "terminal",
+    "auto-update"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check:private": "node scripts/check-private.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
+  }
+}

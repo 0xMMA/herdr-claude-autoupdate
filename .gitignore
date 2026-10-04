@@ -1,0 +1,8 @@
+node_modules/
+coverage/
+*.log
+*.tmp
+.DS_Store
+
+# personal patterns for scripts/check-private.mjs; never commit
+.private-patterns
