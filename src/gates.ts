@@ -102,6 +102,8 @@ export function assess(
   marks: Marks,
   now: number,
   config: GateConfig,
+  /** Whether Claude starts in this folder without a trust dialog (see `isTrustedFolder`). */
+  isTrusted: (cwd: string) => boolean = () => true,
 ): Assessment[] {
   const bySession = new Map<string, AgentInfo>();
   for (const agent of agents) {
@@ -119,6 +121,10 @@ export function assess(
     }
     let verdict = sessionGate(session, installed, marks[session.sessionId], now, config);
     if (verdict.ok) verdict = paneGate(agent, session);
+    // A restart would stop at Claude's trust dialog, whose default answer exits.
+    if (verdict.ok && !isTrusted(session.cwd)) {
+      verdict = never("folder not trusted permanently (e.g. the home directory); restart it yourself");
+    }
     out.push({ session, agent, outdated, verdict });
   }
   return out;

@@ -178,13 +178,15 @@ async function act(candidate: Assessment, fresh: Fresh, rebuilt: RebuiltArgs, de
 
   await deps.sleep(500);
   const name = fresh.agent.name ?? agentNameFor(paneId);
+  let blockedAtStart = false;
   try {
     await herdr.agentStart(name, paneId, rebuilt.args, AGENT_START_TIMEOUT_MS);
   } catch (error) {
-    // Blocked at startup (e.g. a trust dialog) still means Claude is running.
+    // Blocked at startup (a dialog) still means Claude is running; it may need the user.
     if (!(error instanceof HerdrError && error.code === "agent_not_ready")) {
       return { kind: "failed", reason: `agent start failed: ${(error as Error).message}` };
     }
+    blockedAtStart = true;
   }
 
   let resumed: ClaudeSession | undefined;
@@ -197,7 +199,14 @@ async function act(candidate: Assessment, fresh: Fresh, rebuilt: RebuiltArgs, de
     1000,
     deps,
   );
-  if (!resumed) return { kind: "failed", reason: "the resumed session did not come up" };
+  if (!resumed) {
+    return {
+      kind: "failed",
+      reason: blockedAtStart
+        ? "claude started but waits for input in a dialog; answer it in the pane"
+        : "the resumed session did not come up",
+    };
+  }
 
   // The draft goes back first: it must not depend on the version check below.
   const draftRestored = draft === undefined ? undefined : await restoreDraft(deps, paneId, draft);

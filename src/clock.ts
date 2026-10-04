@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { redactArgs } from "./args.ts";
 import {
   defaultModeName,
+  findGitRoot,
   findLauncher,
   installedVersion,
+  isTrustedFolder,
   launcherFingerprint,
   liveSessions,
   readSessions,
+  readTrustedFolders,
   type ClaudeSession,
 } from "./claude.ts";
 import { CONFIG_FILE, loadConfig, type Config } from "./config.ts";
@@ -38,6 +41,8 @@ export interface ClockContext {
   env: Record<string, string | undefined>;
   /** Process liveness check; injectable for tests. */
   isAlive?: (pid: number) => boolean;
+  /** The user's home directory; injectable for tests. */
+  home?: string;
 }
 
 export type Mode = "idle" | "update";
@@ -239,7 +244,12 @@ export class Clock {
       }
     }
 
-    this.assessments = assess(sessions, this.agents, installed, marks, now, this.config);
+    const trusted = readTrustedFolders(this.ctx.paths.claudeConfigFile);
+    if (!trusted) this.log(`cannot read ${this.ctx.paths.claudeConfigFile}; no folder counts as trusted`);
+    const home = this.ctx.home ?? homedir();
+    this.assessments = assess(sessions, this.agents, installed, marks, now, this.config, (cwd) =>
+      trusted ? isTrustedFolder(cwd, trusted, home, findGitRoot(cwd)) : false,
+    );
     this.logReasonChanges();
     this.ctx.store.pruneMarks(new Set(sessions.map((s) => s.sessionId)), now);
 

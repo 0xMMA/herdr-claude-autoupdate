@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { formatVersion, parseVersion } from "./version.ts";
@@ -89,6 +89,56 @@ export function defaultModeFromHelp(help: string): string | undefined {
 
 export async function defaultModeName(launcher: string): Promise<string | undefined> {
   return defaultModeFromHelp(await runLauncher(launcher, "--help"));
+}
+
+/**
+ * Folders Claude Code trusts permanently, from its global config (`~/.claude.json`,
+ * `projects.<path>.hasTrustDialogAccepted`). Undefined if the file cannot be read, in which
+ * case nothing counts as trusted.
+ */
+export function readTrustedFolders(configFile: string): string[] | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(configFile, "utf8")) as { projects?: Record<string, { hasTrustDialogAccepted?: unknown }> };
+    return Object.entries(raw.projects ?? {})
+      .filter(([, project]) => project?.hasTrustDialogAccepted === true)
+      .map(([path]) => path);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The nearest folder at or above `dir` that contains `.git`, if any. */
+export function findGitRoot(dir: string): string | undefined {
+  for (let current = dir; ; current = dirname(current)) {
+    if (existsSync(join(current, ".git"))) return current;
+    if (dirname(current) === current) return undefined;
+  }
+}
+
+/**
+ * Whether Claude will start in `cwd` without asking for folder trust, as observed with
+ * Claude Code 2.1: a trusted entry for the folder or a parent counts, but the search stops
+ * at the git repository root. The home directory never counts: Claude asks there on every
+ * start, so a restart would stop at a dialog whose default answer exits. When in doubt the
+ * answer is "no", which only means the user restarts that pane.
+ */
+export function isTrustedFolder(cwd: string, trusted: readonly string[], home: string, gitRoot: string | undefined): boolean {
+  const norm = (p: string) => {
+    const unified = p.replace(/\\/g, "/").replace(/\/+$/, "");
+    return /^[A-Za-z]:/.test(unified) ? unified.toLowerCase() : unified;
+  };
+  const homeDir = norm(home);
+  const trustedDirs = new Set(trusted.map(norm).filter((t) => t !== homeDir));
+  const boundary = gitRoot === undefined ? undefined : norm(gitRoot);
+  let dir = norm(cwd);
+  if (dir === homeDir) return false;
+  for (;;) {
+    if (trustedDirs.has(dir)) return true;
+    if (dir === boundary) return false;
+    const cut = dir.lastIndexOf("/");
+    if (cut <= 0) return false; // reached a drive ("c:") or the top below "/"
+    dir = dir.slice(0, cut);
+  }
 }
 
 /** Liveness without starting a process: signal 0 only tests for existence, also on Windows. */

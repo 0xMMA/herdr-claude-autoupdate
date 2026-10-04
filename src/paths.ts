@@ -9,6 +9,8 @@ export interface Paths {
   configDir: string;
   /** Claude Code's per-process session files (`<pid>.json`). */
   sessionsDir: string;
+  /** Claude Code's global config, which records trusted folders. */
+  claudeConfigFile: string;
   /** IPC endpoint of the clock for this herdr server. Doubles as the single-instance lock. */
   clockEndpoint: string;
 }
@@ -24,6 +26,7 @@ export function resolvePaths(env: Env = process.env, platform: NodeJS.Platform =
     stateDir,
     configDir,
     sessionsDir: join(claudeDir, "sessions"),
+    claudeConfigFile: env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json"),
     clockEndpoint: clockEndpoint(env.HERDR_SOCKET_PATH ?? "", stateDir, platform),
   };
 }

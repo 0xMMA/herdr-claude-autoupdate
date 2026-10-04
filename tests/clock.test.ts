@@ -23,6 +23,12 @@ function setup(configJson: Record<string, unknown>) {
   };
   mkdirSync(env.HERDR_PLUGIN_CONFIG_DIR);
   writeFileSync(join(env.HERDR_PLUGIN_CONFIG_DIR, "config.json"), JSON.stringify(configJson));
+  mkdirSync(env.CLAUDE_CONFIG_DIR);
+  // The test sessions live in /work/project, which Claude trusts.
+  writeFileSync(
+    join(env.CLAUDE_CONFIG_DIR, ".claude.json"),
+    JSON.stringify({ projects: { "/work": { hasTrustDialogAccepted: true } } }),
+  );
   const paths = resolvePaths(env);
   const herdr = new FakeHerdr();
   const store = new Store(paths.stateDir);
@@ -35,6 +41,7 @@ function setup(configJson: Record<string, unknown>) {
     herdrSocket: undefined,
     env,
     isAlive: () => true,
+    home: "/home/u",
   });
   const writeConfig = (json: Record<string, unknown>) =>
     writeFileSync(join(env.HERDR_PLUGIN_CONFIG_DIR, "config.json"), `${JSON.stringify(json)}\n`);
@@ -140,6 +147,17 @@ test("R11: while no outdated session is idle, herdr is not asked again", async (
   for (let i = 0; i < 3; i++) await clock.check();
   assert.equal(herdr.count("agentList"), calls);
   assert.equal(clock.snapshot().mode, "update");
+});
+
+test("R16: sessions in folders Claude does not trust permanently are never restarted", async () => {
+  const { clock, herdr, paths } = setup({ fake_installed_version: "2.1.290", dry_run: false, quiet_seconds: 0 });
+  writeSession(paths.sessionsDir, session({ version: "2.1.289", cwd: "/home/u" }));
+  herdr.agents = [agent()];
+  await clock.check();
+  const pane = clock.snapshot().panes[0]!;
+  assert.match(pane.status, /folder not trusted/);
+  assert.equal(herdr.count("agentGet") + herdr.count("sendKeys"), 0);
+  assert.equal(clock.snapshot().mode, "idle");
 });
 
 test("a disabled plugin stops the clock", async () => {

@@ -13,8 +13,9 @@ import { existsSync, readFileSync } from "node:fs";
 const ci = process.argv.includes("--ci");
 
 const GENERIC = [
-  { name: "Windows home path", re: /[A-Za-z]:[\\/]+Users[\\/]+(?!(u|user|you|runneradmin|<[^>]+>)[\\/])[A-Za-z0-9._-]+/g },
-  { name: "Unix home path", re: /\/(home|Users)\/(?!(u|user|you|runner|<[^>]+>)\/)[a-z0-9._-]+\//g },
+  // Placeholder user names (u, user, you, CI runners, <name>) are allowed.
+  { name: "Windows home path", re: /[A-Za-z]:[\\/]+Users[\\/]+(?!(u|user|you|runneradmin|<[^>]+>)([\\/"'`\s]|$))[A-Za-z0-9._-]+/g },
+  { name: "Unix home path", re: /\/(home|Users)\/(?!(u|user|you|runner|<[^>]+>)([/"'`\s]|$))[a-z0-9._-]+/g },
   { name: "e-mail address", re: /[A-Za-z0-9._%+-]+@(?!users\.noreply\.github\.com\b)(?!example\.(com|org)\b)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[a-z]{2,}/g },
   { name: "session id (UUID)", re: /\b(?!00000000-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi },
 ];

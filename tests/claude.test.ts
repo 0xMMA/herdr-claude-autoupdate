@@ -2,7 +2,19 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { defaultModeFromHelp, findLauncher, isAlive, launcherFingerprint, liveSessions, parseSession, readSessions, versionFromInstallPath } from "../src/claude.ts";
+import {
+  defaultModeFromHelp,
+  findGitRoot,
+  findLauncher,
+  isAlive,
+  isTrustedFolder,
+  launcherFingerprint,
+  liveSessions,
+  parseSession,
+  readSessions,
+  readTrustedFolders,
+  versionFromInstallPath,
+} from "../src/claude.ts";
 import { session, tempDir, writeSession } from "./helpers.ts";
 
 const LAUNCHER = process.platform === "win32" ? "claude.exe" : "claude";
@@ -73,6 +85,41 @@ test("R3: reads the default permission mode name from claude --help", () => {
   assert.equal(defaultModeFromHelp(help), "manual");
   assert.equal(defaultModeFromHelp(help.replace('"manual"', '"default"')), "default");
   assert.equal(defaultModeFromHelp("no such option"), undefined);
+});
+
+test("R16: folder trust comes from Claude's config; the home directory never counts", () => {
+  const dir = tempDir();
+  const file = join(dir, ".claude.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      projects: {
+        "C:/Source": { hasTrustDialogAccepted: true },
+        "/home/u": { hasTrustDialogAccepted: true },
+        "/srv/untrusted": { hasTrustDialogAccepted: false },
+      },
+    }),
+  );
+  const trusted = readTrustedFolders(file)!;
+  assert.deepEqual(trusted, ["C:/Source", "/home/u"]);
+  const winHome = "C:\\Users\\u";
+  assert.equal(isTrustedFolder("C:\\Source\\notes\\x", trusted, winHome, undefined), true, "outside a repo a trusted parent counts");
+  assert.equal(isTrustedFolder("C:\\Source\\repo", trusted, winHome, "C:\\Source\\repo"), false, "the search stops at the git root");
+  assert.equal(isTrustedFolder("C:\\Source\\repo\\sub", trusted, winHome, "C:\\Source\\repo"), false);
+  assert.equal(isTrustedFolder("C:\\Source", trusted, winHome, undefined), true, "the folder itself");
+  assert.equal(isTrustedFolder("C:\\SourceCode", trusted, winHome, undefined), false, "a name prefix is not a parent");
+  assert.equal(isTrustedFolder("/home/u", trusted, "/home/u", undefined), false, "home never counts");
+  assert.equal(isTrustedFolder("/home/u/notes", trusted, "/home/u", undefined), false, "nor does it count as a parent");
+  assert.equal(isTrustedFolder("/srv/untrusted", trusted, "/home/u", undefined), false);
+  assert.equal(readTrustedFolders(join(dir, "missing.json")), undefined);
+});
+
+test("finds the git repository root", () => {
+  const repo = tempDir();
+  mkdirSync(join(repo, ".git"));
+  mkdirSync(join(repo, "a", "b"), { recursive: true });
+  assert.equal(findGitRoot(join(repo, "a", "b")), repo);
+  assert.equal(findGitRoot(repo), repo);
 });
 
 test("drops session files of dead processes and duplicate session ids", () => {
